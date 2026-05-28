@@ -1,466 +1,292 @@
-# DNS — Domain Name System (Hệ thống Phân giải Tên Miền)
+# DNS — Domain Name System
 
 ---
 
 ## Giải thích cho người mới hoàn toàn
 
-Hãy tưởng tượng bạn muốn gọi điện cho bạn bè nhưng bạn không nhớ số điện thoại, chỉ nhớ tên. Bạn tra danh bạ điện thoại: gõ tên "Nguyễn Văn An" → danh bạ trả về số "0912.345.678" → bạn gọi được.
+Địa chỉ IP của máy chủ Google là `142.250.190.78`. Bạn sẽ không thể nhớ được con số này. Vì vậy, người ta tạo ra DNS — một cuốn **danh bạ điện thoại khổng lồ** của Internet.
 
-**DNS** là quyển "danh bạ điện thoại" của Internet:
-- Bạn gõ `www.google.com` vào trình duyệt (tên dễ nhớ)
-- DNS tra cứu và trả về địa chỉ IP `142.250.185.46` (số điện thoại của Google)
-- Trình duyệt kết nối đến địa chỉ IP đó
+Khi bạn gõ `google.com` vào trình duyệt:
+1. Máy tính hỏi "DNS resolver": *"google.com có địa chỉ IP là bao nhiêu?"*
+2. DNS resolver tra cứu trong danh bạ và trả lời: *"142.250.190.78"*
+3. Trình duyệt dùng IP đó để kết nối đến server Google
 
-Tại sao cần DNS? Vì con người nhớ tên tốt hơn nhớ dãy số. Máy tính ngược lại — cần địa chỉ IP để kết nối.
-
-Và giống như danh bạ có nhiều cấp (danh bạ địa phương, danh bạ quốc gia...), DNS cũng có cấu trúc phân cấp từ trung ương đến địa phương để phân tán tải và quản lý hàng tỷ tên miền.
+Cả quá trình này xảy ra trong vài mili-giây mà bạn không biết gì. Đó là DNS — chuyển tên miền dễ nhớ thành địa chỉ IP máy tính hiểu được.
 
 ---
 
 ## Giải thích cho người đã biết lập trình (nâng cao)
 
-### DNS là Distributed Hierarchical Database
+### DNS Hierarchy — Cấu trúc phân cấp
 
-DNS không phải một máy chủ duy nhất mà là hệ thống phân tán với hàng nghìn server toàn cầu, phân cấp thành:
+DNS là hệ thống **phân tán, phân cấp** — không có một server trung tâm nào chứa toàn bộ mapping.
 
 ```
 Root (.)
 ├── .com
-│   ├── google.com
-│   │   └── www.google.com
-│   ├── facebook.com
-│   └── ...
-├── .vn
-│   ├── vnexpress.net (chú ý: .net là TLD khác)
-│   └── ...
+│   ├── google.com  (authoritative nameserver của Google)
+│   │   ├── www.google.com → 142.250.190.78
+│   │   └── mail.google.com → ...
+│   └── facebook.com
 ├── .org
-└── ...
+│   └── wikipedia.org
+└── .vn
+    └── vnexpress.net
 ```
 
-### DNS Resolution — Quá trình phân giải
+**4 thành phần chính:**
 
-**Recursive Query** (phổ biến, client dùng):
+| Thành phần | Vai trò | Ví dụ |
+|------------|---------|-------|
+| DNS Resolver (Recursive) | Hỏi thay cho client, cache kết quả | 8.8.8.8 (Google), 1.1.1.1 (Cloudflare) |
+| Root Name Server | Biết địa chỉ TLD servers | 13 root servers (a–m.root-servers.net) |
+| TLD Name Server | Biết authoritative servers cho domain | Verisign (.com), IANA (.org) |
+| Authoritative Name Server | Chứa DNS records thực sự | Route 53, Cloudflare DNS |
+
+### DNS Resolution Process — Từng bước
 
 ```
-Browser               Recursive Resolver     Root NS     TLD NS (.com)    Authoritative NS
-  |                        |                   |              |                  |
-  | query: www.google.com  |                   |              |                  |
-  |----------------------->|                   |              |                  |
-  |                        |                   |              |                  |
-  |                        | Hỏi Root NS       |              |                  |
-  |                        |------------------>|              |                  |
-  |                        |  "Hỏi .com NS"   |              |                  |
-  |                        |<------------------|              |                  |
-  |                        |                                  |                  |
-  |                        | Hỏi .com TLD NS                  |                  |
-  |                        |---------------------------------->|                  |
-  |                        |  "Hỏi google.com NS"             |                  |
-  |                        |<----------------------------------|                  |
-  |                        |                                                     |
-  |                        | Hỏi google.com Authoritative NS                    |
-  |                        |---------------------------------------------------->|
-  |                        |  "www.google.com → 142.250.185.46"                 |
-  |                        |<----------------------------------------------------|
-  |                        |                                                     
-  | IP: 142.250.185.46     |
-  |<-----------------------|
+Browser           OS Cache         Resolver         Root NS       TLD NS (.com)    Authoritative
+   |                  |               |                |               |                |
+   |-- query -------> |               |                |               |                |
+   |  (cache miss)    |               |                |               |                |
+   |<-- not found --- |               |                |               |                |
+   |                  |               |                |               |                |
+   |------------- query -----------> |                |               |                |
+   |              (resolver cache miss)                |               |                |
+   |                  |               |-- query -----> |               |                |
+   |                  |               |<- "hỏi .com TLD" ------------ |                |
+   |                  |               |                |               |                |
+   |                  |               |-- query ---------------------->|                |
+   |                  |               |<- "hỏi ns1.google.com" ------- |                |
+   |                  |               |                |               |                |
+   |                  |               |-- query ------------------------------------------------>|
+   |                  |               |<- "google.com = 142.250.190.78" ----------------------- |
+   |                  |               |                |               |                |
+   |<----------- response (IP) ----- |                |               |                |
+   |  (resolver caches kết quả)      |                |               |                |
 ```
 
-- **Recursive Resolver**: Thường là ISP hoặc Google (8.8.8.8), Cloudflare (1.1.1.1). Thực hiện toàn bộ quá trình tìm kiếm thay cho client.
-- **Root Nameserver**: 13 địa chỉ IP logic (a.root-servers.net → m.root-servers.net), biết TLD nào do ai quản lý. Thực tế có >1000 instance nhờ Anycast.
-- **TLD Nameserver**: Quản lý `.com`, `.vn`, `.org`... biết authoritative NS cho mỗi domain.
-- **Authoritative Nameserver**: Lưu records thực sự của domain.
-
-**Iterative Query** (DNS server hỏi server khác):
-Resolver hỏi Root → Root trả về địa chỉ TLD NS → Resolver hỏi TLD NS → TLD NS trả về địa chỉ Authoritative NS → Resolver hỏi Authoritative NS → nhận kết quả.
+**Iterative vs Recursive:**
+- **Recursive resolution**: client hỏi resolver, resolver tự đi hỏi hết rồi trả kết quả
+- **Iterative resolution**: resolver hỏi root, root trả về "hỏi TLD", resolver hỏi TLD, TLD trả về "hỏi authoritative", ...
 
 ### DNS Record Types
 
-| Type | Tên đầy đủ | Ý nghĩa | Ví dụ |
-|------|-----------|---------|-------|
-| **A** | Address | IPv4 address | `google.com → 142.250.185.46` |
-| **AAAA** | IPv6 Address | IPv6 address | `google.com → 2607:f8b0:4004:c1b::65` |
-| **CNAME** | Canonical Name | Alias → tên khác | `www.example.com → example.com` |
-| **MX** | Mail Exchange | Mail server + priority | `example.com → mail.example.com (priority 10)` |
-| **TXT** | Text | Dữ liệu text tùy ý | SPF, DKIM, domain verification |
-| **NS** | Nameserver | Authoritative NS của domain | `example.com → ns1.dnsprovider.com` |
-| **PTR** | Pointer | Reverse DNS (IP → tên) | `46.185.250.142.in-addr.arpa → google.com` |
-| **SOA** | Start of Authority | Thông tin về zone | Serial, refresh, retry, expire |
-| **SRV** | Service | Xác định server cho service | `_http._tcp.example.com → host:port` |
-| **CAA** | Cert Authority Auth | CA được phép cấp cert | `example.com → letsencrypt.org` |
+| Record | Mục đích | Ví dụ |
+|--------|----------|-------|
+| **A** | Ánh xạ hostname → IPv4 | `www.example.com → 93.184.216.34` |
+| **AAAA** | Ánh xạ hostname → IPv6 | `www.example.com → 2606:2800:220:1:248:1893:25c8:1946` |
+| **CNAME** | Alias — trỏ đến hostname khác | `blog.example.com → example.wordpress.com` |
+| **MX** | Mail server (email routing) | `example.com → mail.example.com (priority 10)` |
+| **NS** | Nameserver cho domain | `example.com → ns1.digitalocean.com` |
+| **TXT** | Text arbitrary — SPF, DKIM, verification | `"v=spf1 include:_spf.google.com ~all"` |
+| **PTR** | Reverse lookup (IP → hostname) | `34.216.184.93.in-addr.arpa → www.example.com` |
+| **SOA** | Start of Authority — thông tin chính của zone | Serial, refresh, retry, expire, TTL |
+| **SRV** | Service location (port + hostname) | `_http._tcp.example.com → 10 5 80 www.example.com` |
+| **CAA** | Xác định CA được phép cấp cert | `example.com → letsencrypt.org` |
 
-### CNAME vs A Record
+### DNS Caching và TTL
 
-```
-# KHÔNG dùng CNAME ở apex domain (naked domain):
-example.com CNAME other.com    ← SAI (RFC không cho phép CNAME ở apex)
-
-# Đúng cách:
-www.example.com CNAME example.com  ← OK
-example.com A 93.184.216.34        ← OK
-
-# ALIAS/ANAME record (extension của một số DNS provider):
-example.com ALIAS other.com    ← Cho phép ở apex, provider tự resolve
-```
-
-### TTL và DNS Caching
+**TTL (Time To Live)**: số giây DNS record được cache.
 
 ```
-Quá trình cache:
-1. Browser cache: A record lưu TTL giây, kể từ khi nhận
-2. OS cache: /etc/hosts được check đầu tiên, luôn override DNS
-3. Recursive Resolver cache: dùng chung giữa nhiều client
-4. Khi TTL = 0: không cache, luôn query
-
-Ảnh hưởng TTL:
-- TTL thấp (300s): thay đổi DNS có hiệu lực nhanh, tăng query load
-- TTL cao (86400s): giảm query, nhưng thay đổi DNS propagate chậm
-
-Khi migrate server:
-- Giảm TTL xuống 300s trước 24-48 giờ
-- Migrate, verify
-- Cập nhật DNS record
-- Sau khi ổn định, tăng TTL lại
+example.com.  3600  IN  A  93.184.216.34
+              ^^^^
+              TTL = 3600 giây = 1 giờ
 ```
 
-### DNS Caching ở nhiều tầng
+**Cache layers:**
+1. **Browser cache**: Chrome cache DNS 1 phút (có thể xem tại `chrome://net-internals/#dns`)
+2. **OS cache**: `nscd`, Windows DNS Client service
+3. **Recursive resolver cache**: ISP hoặc 8.8.8.8 cache theo TTL
+4. **Negative caching**: NXDOMAIN (domain không tồn tại) cũng được cache (SOA minimum TTL)
 
-```
-Browser → OS Resolver → Recursive Resolver (ISP/Google/Cloudflare)
-                              ↓
-                    Check cache trước
-                    Miss → query Root NS
-                    
-/etc/hosts (Linux/Mac) — override tất cả DNS:
-127.0.0.1   localhost
-192.168.1.100   mydev.local
-
-/etc/resolv.conf (Linux) — cấu hình DNS server:
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-search example.com          # tự thêm domain khi lookup ngắn
-```
+**Khi thay đổi DNS record**: phải chờ TTL cũ hết hạn trên toàn hệ thống. Trick: giảm TTL xuống 300s trước khi thay đổi, sau đó thay đổi, chờ 5 phút, tăng TTL lại.
 
 ### DNS over HTTPS (DoH) và DNS over TLS (DoT)
 
-| | Truyền thống | DNS over TLS (DoT) | DNS over HTTPS (DoH) |
-|-|-------------|-------------------|---------------------|
-| Port | 53 UDP/TCP | 853 TCP | 443 HTTPS |
-| Mã hóa | Không | TLS | TLS (trong HTTPS) |
-| Privacy | ISP thấy tất cả | ISP thấy bạn dùng DoT | Lẫn với HTTPS traffic |
-| Firewall | Dễ bị chặn/intercept | Dễ nhận diện (port 853) | Khó chặn (port 443) |
-| Hỗ trợ | Universal | Tích hợp OS | Browser (Firefox default) |
+DNS truyền thống dùng UDP port 53 — **plaintext**, ISP và các bên trung gian có thể:
+- Theo dõi bạn đang truy cập domain nào
+- DNS spoofing (chỉnh sửa response)
+
+| | Truyền thống | DoT | DoH |
+|-|-------------|-----|-----|
+| Port | UDP/TCP 53 | TCP 853 | HTTPS 443 |
+| Mã hóa | Không | TLS | TLS qua HTTPS |
+| Phát hiện | Dễ (port 53) | Dễ (port 853) | Khó (lẫn với HTTPS) |
+| Privacy | Không | Tốt | Tốt nhất |
+| Hỗ trợ | Universal | Limited | Firefox, Chrome, Windows 11 |
+
+### DNSSEC — DNS Security Extensions
+
+DNSSEC ký số (digital signature) các DNS record để ngăn spoofing:
+- Mỗi zone có cặp key ZSK (Zone Signing Key) và KSK (Key Signing Key)
+- Client verify chữ ký dọc theo chain từ root → TLD → authoritative
+- Không mã hóa (vẫn plaintext), chỉ đảm bảo **integrity và authenticity**
 
 ### DNS Attacks
 
-**1. DNS Cache Poisoning / Spoofing**
-```
-Attacker chèn record giả vào cache của resolver:
-google.com → 1.2.3.4 (IP của attacker thay vì IP thật)
-
-Phòng chống: DNSSEC (ký số các DNS records)
-```
-
-**2. DDoS Amplification Attack**
-```
-Attacker gửi DNS query nhỏ (60 bytes) với source IP giả (victim)
-DNS server trả response lớn (3000+ bytes) về victim
-Amplification factor: 50x
-
-Query: ANY isc.org → response 3000 bytes
-50 queries/s × 50x amplification = 150 Kbps → victim
-
-Phòng chống: Rate limiting, disable ANY query, Response Rate Limiting (RRL)
-```
-
-**3. DNS Hijacking**
-```
-ISP hoặc attacker redirect DNS responses:
-- ISP: chặn domain, redirect về trang cảnh báo
-- Attacker: MITM, sửa response
-- Phòng chống: DoH/DoT, DNSSEC
-```
-
-**4. Subdomain Takeover**
-```
-example.com có CNAME tới subdomain.hosting.com
-Hosting provider xóa account → subdomain.hosting.com trống
-Attacker đăng ký subdomain.hosting.com → kiểm soát domain
-```
+| Tấn công | Cơ chế | Phòng chống |
+|----------|--------|-------------|
+| DNS Spoofing / Cache Poisoning | Inject bản ghi giả vào cache resolver | DNSSEC, kiểm tra source port và transaction ID ngẫu nhiên |
+| DNS Amplification DDoS | Gửi query với IP giả (victim) đến resolver open → resolver gửi response lớn về victim | Rate limiting, không cho phép recursive resolver public |
+| DNS Tunneling | Encode data trong DNS queries (C2 malware) | DNS query analytics, block unusual query patterns |
+| NXDOMAIN attack | Query hàng triệu domain không tồn tại để làm nghẽn resolver | Rate limiting per IP |
 
 ---
 
 ## Định nghĩa chính xác
 
-**DNS (Domain Name System)**: Hệ thống phân cấp phân tán (RFC 1034, 1035) cung cấp dịch vụ phân giải tên miền sang địa chỉ IP và ngược lại. Hoạt động theo mô hình client-server trên UDP port 53 (hoặc TCP cho responses > 512 bytes hoặc zone transfer).
-
-**Zone**: Một phần của DNS namespace mà một authoritative nameserver có quyền quản lý. Mỗi zone có một file zone chứa resource records.
-
-**DNSSEC**: DNS Security Extensions — thêm digital signature vào DNS records để xác thực tính toàn vẹn.
+**DNS** (Domain Name System) là hệ thống phân cấp, phân tán để ánh xạ human-readable domain names thành IP addresses và các thông tin khác (MX, TXT, ...). Được định nghĩa trong RFC 1034 và RFC 1035. DNS hoạt động theo mô hình client-server, thường dùng UDP port 53 (TCP khi response > 512 bytes hoặc zone transfer). Hệ thống bao gồm recursive resolvers, root name servers, TLD name servers, và authoritative name servers.
 
 ---
 
-## Bảng / Sơ đồ kỹ thuật
+## Đặc điểm kỹ thuật / So sánh
 
-### DNS Packet Format
-
-```
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|                      ID                       |  16-bit transaction ID
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|QR|  Opcode   |AA|TC|RD|RA|   Z    |   RCODE   |  Flags
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|                    QDCOUNT                    |  Số lượng questions
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|                    ANCOUNT                    |  Số lượng answers
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|                    NSCOUNT                    |  Số lượng authority records
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-|                    ARCOUNT                    |  Số lượng additional records
-+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
-```
-
-Flags quan trọng:
-- **QR**: 0 = query, 1 = response
-- **RD**: Recursion Desired (client yêu cầu recursive)
-- **RA**: Recursion Available (server hỗ trợ recursive)
-- **AA**: Authoritative Answer
-- **RCODE**: 0=OK, 1=Format error, 2=Server fail, 3=Name error (NXDOMAIN), 5=Refused
+| Tiêu chí | DNS (UDP) | DNS (TCP) | DoT | DoH |
+|----------|-----------|-----------|-----|-----|
+| Port | 53 | 53 | 853 | 443 |
+| Transport | UDP | TCP | TLS/TCP | HTTPS |
+| Max payload | 512 bytes (EDNS: 4096) | Unlimited | Unlimited | Unlimited |
+| Latency | Thấp nhất | Cao hơn | Cao hơn | Cao nhất |
+| Dùng khi | Query thông thường | Zone transfer, large response | Privacy | Privacy + bypass filtering |
 
 ---
 
 ## Code mẫu
 
-### Python — dns.resolver để query DNS
-
 ```python
-import dns.resolver
-import dns.reversename
 import socket
+import dns.resolver  # pip install dnspython
 
-# Cài đặt: pip install dnspython
+# ── 1. DNS lookup cơ bản bằng socket
+hostname = "google.com"
+ip = socket.gethostbyname(hostname)
+print(f"{hostname} → {ip}")
 
-def query_dns_records():
-    resolver = dns.resolver.Resolver()
-    # Dùng Cloudflare DNS
-    resolver.nameservers = ['1.1.1.1', '1.0.0.1']
-    
-    domain = 'google.com'
-    
-    # A record (IPv4)
-    print(f"\n=== A Records cho {domain} ===")
-    try:
-        answers = resolver.resolve(domain, 'A')
-        for rdata in answers:
-            print(f"  {domain} → {rdata.address} (TTL: {answers.ttl}s)")
-    except dns.resolver.NXDOMAIN:
-        print(f"  Domain {domain} không tồn tại")
-    except dns.resolver.NoAnswer:
-        print(f"  Không có A record")
-    
-    # AAAA record (IPv6)
-    print(f"\n=== AAAA Records ===")
-    try:
-        answers = resolver.resolve(domain, 'AAAA')
-        for rdata in answers:
-            print(f"  {domain} → {rdata.address}")
-    except Exception as e:
-        print(f"  {e}")
-    
-    # MX records
-    print(f"\n=== MX Records ===")
-    answers = resolver.resolve(domain, 'MX')
-    for rdata in sorted(answers, key=lambda x: x.preference):
-        print(f"  Priority {rdata.preference}: {rdata.exchange}")
-    
-    # TXT records (SPF, DKIM, etc.)
-    print(f"\n=== TXT Records ===")
-    try:
-        answers = resolver.resolve(domain, 'TXT')
-        for rdata in answers:
-            for txt_string in rdata.strings:
-                print(f"  {txt_string.decode()}")
-    except Exception as e:
-        print(f"  {e}")
-    
-    # NS records
-    print(f"\n=== NS Records ===")
-    answers = resolver.resolve(domain, 'NS')
+# Tất cả IP (round-robin)
+all_ips = socket.getaddrinfo(hostname, 80)
+for item in all_ips:
+    print(item[4][0])
+
+# ── 2. Reverse DNS lookup (PTR record)
+ip = "8.8.8.8"
+try:
+    result = socket.gethostbyaddr(ip)
+    print(f"Reverse DNS: {ip} → {result[0]}")  # dns.google
+except socket.herror:
+    print("No PTR record")
+
+# ── 3. Query DNS records với dnspython
+resolver = dns.resolver.Resolver()
+resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # dùng Google + Cloudflare
+
+# A record
+answers = resolver.resolve('google.com', 'A')
+print("A records:")
+for rdata in answers:
+    print(f"  {rdata.address}")
+
+# MX record
+answers = resolver.resolve('gmail.com', 'MX')
+print("MX records:")
+for rdata in sorted(answers, key=lambda r: r.preference):
+    print(f"  Priority {rdata.preference}: {rdata.exchange}")
+
+# TXT record (SPF)
+answers = resolver.resolve('google.com', 'TXT')
+print("TXT records:")
+for rdata in answers:
+    print(f"  {rdata.strings}")
+
+# NS record
+answers = resolver.resolve('google.com', 'NS')
+print("NS records:")
+for rdata in answers:
+    print(f"  {rdata.target}")
+
+# CNAME
+try:
+    answers = resolver.resolve('www.github.com', 'CNAME')
     for rdata in answers:
-        print(f"  {rdata.target}")
+        print(f"CNAME: www.github.com → {rdata.target}")
+except dns.resolver.NoAnswer:
+    print("No CNAME (direct A record)")
 
-
-def reverse_dns_lookup(ip: str):
-    """Reverse DNS: IP → hostname"""
-    try:
-        # Dùng dns.reversename để tạo PTR query name
-        rev_name = dns.reversename.from_address(ip)
-        print(f"Reverse lookup: {ip} → PTR name: {rev_name}")
-        
-        answer = dns.resolver.resolve(rev_name, 'PTR')
-        for rdata in answer:
-            print(f"  {ip} → {rdata.target}")
-    except Exception as e:
-        print(f"  Lỗi: {e}")
-    
-    # Cách đơn giản hơn với socket
-    try:
-        hostname = socket.gethostbyaddr(ip)
-        print(f"  socket.gethostbyaddr: {hostname}")
-    except socket.herror as e:
-        print(f"  {e}")
-
-
-def check_dns_propagation(domain: str, record_type: str = 'A'):
-    """Kiểm tra DNS record từ nhiều server khác nhau"""
-    dns_servers = {
-        'Google Primary': '8.8.8.8',
-        'Google Secondary': '8.8.4.4',
+# ── 4. Check DNS propagation — so sánh từ nhiều resolver
+def check_propagation(domain, record_type='A'):
+    resolvers = {
+        'Google': '8.8.8.8',
         'Cloudflare': '1.1.1.1',
         'OpenDNS': '208.67.222.222',
     }
-    
-    print(f"\n=== DNS Propagation Check: {domain} ({record_type}) ===")
-    for name, server in dns_servers.items():
-        resolver = dns.resolver.Resolver()
-        resolver.nameservers = [server]
-        resolver.timeout = 3
+    for name, ns in resolvers.items():
+        r = dns.resolver.Resolver()
+        r.nameservers = [ns]
         try:
-            answers = resolver.resolve(domain, record_type)
-            ips = [str(r.address) for r in answers]
-            print(f"  [{name} {server}]: {', '.join(ips)}")
+            answers = r.resolve(domain, record_type)
+            ips = [str(a) for a in answers]
+            print(f"  {name} ({ns}): {ips}")
         except Exception as e:
-            print(f"  [{name} {server}]: ERROR - {e}")
+            print(f"  {name}: Error — {e}")
 
-
-if __name__ == '__main__':
-    query_dns_records()
-    
-    print("\n" + "="*50)
-    reverse_dns_lookup('8.8.8.8')
-    
-    print("\n" + "="*50)
-    check_dns_propagation('github.com')
-```
-
-### Bash — Debug DNS với dig và nslookup
-
-```bash
-# Query A record
-dig google.com A
-
-# Query với specific DNS server (@)
-dig @8.8.8.8 google.com A
-
-# Query tất cả record types
-dig google.com ANY
-
-# Chỉ xem answer, không có extra info
-dig +short google.com
-
-# Trace toàn bộ quá trình resolution (recursive)
-dig +trace google.com
-
-# Reverse DNS lookup
-dig -x 8.8.8.8
-
-# Query MX records
-dig google.com MX
-
-# Query TXT records (kiểm tra SPF)
-dig google.com TXT
-
-# Kiểm tra DNSSEC
-dig +dnssec google.com
-
-# Xem TTL còn lại
-dig +ttl google.com
-
-# nslookup (cross-platform, đơn giản hơn)
-nslookup google.com
-nslookup google.com 1.1.1.1
-
-# Flush DNS cache
-# Linux (systemd-resolved):
-sudo systemd-resolve --flush-caches
-# macOS:
-sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder
-# Windows:
-ipconfig /flushdns
-
-# Xem /etc/hosts
-cat /etc/hosts
-
-# Xem DNS server đang dùng
-cat /etc/resolv.conf
-resolvectl status  # systemd-resolved
+print("DNS propagation check for example.com:")
+check_propagation("example.com")
 ```
 
 ---
 
 ## Khi nào dùng / Khi nào KHÔNG dùng
 
-**Dùng DNS trực tiếp khi:**
-- Cần service discovery trong microservices (DNS-based load balancing)
-- Kiểm tra domain ownership (TXT record verification)
-- Email authentication (MX, SPF TXT, DKIM TXT)
-- Phân tích propagation khi migrate domain
+**DNS dùng khi:**
+- Cần ánh xạ domain → IP (luôn dùng)
+- Email routing (MX record)
+- Xác minh domain ownership (TXT record: Google Search Console, Let's Encrypt)
+- Load balancing địa lý (Geo DNS / Anycast)
+- Service discovery trong microservices (SRV record hoặc DNS-based)
 
-**Dùng DoH/DoT khi:**
-- Privacy quan trọng (ISP không nên thấy bạn truy cập gì)
-- Môi trường mạng không tin cậy (public WiFi)
-- Tránh DNS hijacking của ISP
+**Lưu ý TTL:**
+- TTL thấp (60–300s): tốt cho thay đổi thường xuyên, nhưng tăng DNS query load
+- TTL cao (86400s = 1 ngày): ít query hơn, nhưng thay đổi mất nhiều thời gian propagate
 
-**Không tự viết DNS resolver khi:**
-- Thư viện hệ thống (`getaddrinfo()`, `socket.getaddrinfo()`) đã xử lý caching, TTL, failover tự động
-- Chỉ cần lookup đơn giản — dùng built-in
+**Không nên:**
+- Dùng DNS round-robin làm load balancer chính — client cache IP, không thấy server down
+- Để TTL quá thấp thường xuyên — tăng tải cho resolver
 
-**Lưu ý cho production:**
-- Cấu hình multiple authoritative NS (ít nhất 2) để tránh single point of failure
-- Dùng health check + automated DNS failover (Route 53, Cloudflare Load Balancing)
-- GeoDNS: trả về IP server gần nhất với client
+---
+
+## So sánh với các cơ chế discovery khác
+
+| | DNS | /etc/hosts | mDNS | Service Mesh |
+|-|-----|------------|------|-------------|
+| Scope | Internet-wide | Local machine only | Local network | Cluster-internal |
+| Cập nhật | Propagate theo TTL | Instant | Broadcast | Instant |
+| Use case | Mọi nơi | Testing, override | IoT, Bonjour | Kubernetes, Istio |
+| Privacy | Thấp (UDP plaintext) | N/A | LAN only | Tốt (mTLS) |
 
 ---
 
 ## Lỗi thường gặp (Common Pitfalls)
 
-1. **Quên giảm TTL trước khi migrate**: DNS record cũ còn cache ở resolver. Cần giảm TTL 24-48h trước migration.
-
-2. **CNAME ở apex domain**: `example.com CNAME something` vi phạm RFC — dùng A record hoặc ALIAS/ANAME record của DNS provider.
-
-3. **CNAME chain quá dài**: CNAME trỏ đến CNAME khác nhiều cấp → tăng latency. Giới hạn thường 8 hops.
-
-4. **Hardcode IP thay vì dùng hostname**: IP có thể thay đổi. Luôn dùng hostname + DNS.
-
-5. **Không verify DNS propagation**: Sau khi cập nhật record, phải kiểm tra từ nhiều resolver trước khi kết luận đã propagate.
-
-6. **SPF record dùng sai**: Nhiều SPF record cho một domain → email bị từ chối. Chỉ được có 1 TXT record SPF.
-
-7. **Wildcard DNS hiểu sai**: `*.example.com A 1.2.3.4` chỉ match 1 level: `sub.example.com` match, nhưng `a.b.example.com` không match.
-
-8. **DNS không cache NXDOMAIN đủ lâu**: Tốn query cho domain không tồn tại. Cấu hình negative TTL qua SOA record.
+- **Quên giảm TTL trước khi migration**: nếu TTL=86400, sau khi đổi DNS record phải chờ 1 ngày. Giảm TTL xuống 300 trước ít nhất 1 ngày trước khi migrate.
+- **CNAME trỏ vào CNAME (chain)**: gây thêm DNS lookup, giảm performance. Mỗi CNAME là 1 query thêm.
+- **CNAME cho apex domain (naked domain)**: `example.com` không thể dùng CNAME (RFC cấm). Dùng ALIAS/ANAME record hoặc A record trực tiếp.
+- **Nhầm A vs CNAME**: Dùng CNAME khi cần alias, A khi có IP cụ thể. CNAME cho subdomain, không cho root domain.
+- **Không có MX record**: email gửi đến domain đó sẽ thất bại.
+- **DNS cache poisoning không phòng**: resolver không bật DNSSEC validation.
+- **Hardcode IP thay vì domain**: nếu server đổi IP, phải deploy lại code. Dùng domain + DNS.
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-1. **Giải thích quá trình từ khi gõ URL đến khi trang web hiển thị (DNS phần)?**
-   - Browser cache check → OS cache (/etc/hosts) → Local DNS resolver → Recursive resolver (ISP/Google/CF) → Root NS → TLD NS → Authoritative NS → IP address.
-
-2. **DNS dùng UDP hay TCP? Tại sao?**
-   - Chủ yếu UDP (port 53) vì queries nhỏ, nhanh, không cần overhead của TCP. Dùng TCP khi: response > 512 bytes (hoặc 4096 bytes với EDNS0), zone transfer (AXFR), DNSSEC.
-
-3. **Sự khác biệt giữa recursive và iterative DNS query?**
-   - Recursive: resolver chịu trách nhiệm tìm answer hoàn toàn, client nhận answer cuối cùng. Iterative: mỗi lần hỏi, server trả về địa chỉ NS tiếp theo để hỏi.
-
-4. **TTL là gì và ảnh hưởng thế nào đến performance?**
-   - Time To Live: thời gian record được cache. TTL cao = ít query, nhanh hơn nhưng thay đổi chậm propagate. TTL thấp = thay đổi nhanh nhưng nhiều query hơn.
-
-5. **DNS poisoning là gì và cách phòng chống?**
-   - Attacker chèn record giả vào cache resolver. Phòng: DNSSEC (ký số records), DoH/DoT (mã hóa transport), randomize query port và transaction ID.
-
-6. **Giải thích sự khác biệt A, AAAA, CNAME record.**
-   - A: domain → IPv4. AAAA: domain → IPv6. CNAME: domain → domain khác (alias). CNAME không thể dùng ở apex domain.
-
-7. **Load balancing với DNS hoạt động thế nào?**
-   - Round-robin DNS: nhiều A record cho cùng domain, resolver trả về theo vòng tròn. Hạn chế: client cache làm mất cân bằng, không health check. Giải pháp tốt hơn: Anycast, GeoDNS với health check.
+- Giải thích quá trình DNS resolution từng bước khi gõ `google.com` vào trình duyệt.
+- Sự khác biệt giữa recursive và iterative DNS resolution?
+- TTL là gì? Tại sao quan trọng khi migrate server?
+- A record vs CNAME — khi nào dùng cái nào? Tại sao không dùng CNAME cho apex domain?
+- DNS cache poisoning là gì? DNSSEC giải quyết ra sao?
+- Sự khác biệt giữa DoH và DoT? Cái nào privacy hơn?
+- Có bao nhiêu root name server? Tại sao không nhiều hơn/ít hơn?
+- Làm thế nào DNS được dùng để load balance traffic?
+- Tại sao DNS dùng UDP thay vì TCP? Khi nào dùng TCP?

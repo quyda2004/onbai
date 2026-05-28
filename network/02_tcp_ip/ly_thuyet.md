@@ -4,404 +4,316 @@
 
 ## Giải thích cho người mới hoàn toàn
 
-Tưởng tượng bạn gửi một bức thư dài cho bạn bè ở xa. Vì phong bì chỉ chứa được một tờ giấy, bạn phải cắt bức thư thành nhiều mảnh nhỏ, đánh số thứ tự từng mảnh (tờ 1/10, tờ 2/10...) rồi gửi từng phong bì đi.
+Hãy tưởng tượng bạn cần chuyển một bộ phim lớn (10GB) từ máy tính của mình sang máy bạn qua mạng. Bạn không thể gửi nguyên cả file một lúc — giống như không thể gửi một chiếc xe ô tô qua bưu điện nguyên vẹn. Bạn phải **tháo rời từng bộ phận** (chia thành các gói nhỏ), ghi số thứ tự lên mỗi bộ phận, gửi đi, rồi bên kia **lắp ráp lại** đúng thứ tự.
 
-Người nhận thu thập đủ 10 phong bì, sắp xếp theo số thứ tự và ghép lại thành bức thư gốc. Nếu phong bì số 5 bị thất lạc, người nhận sẽ nhắn lại "tôi chưa nhận được tờ số 5" và bạn gửi lại tờ đó.
+Đó chính xác là **TCP** — chia nhỏ dữ liệu thành "gói" (packet), đánh số, gửi đi, xác nhận đã nhận, và lắp ráp lại ở đầu kia. Nếu có gói bị thất lạc, TCP gửi lại.
 
-Đó chính xác là cách **TCP (Transmission Control Protocol)** hoạt động:
-- Dữ liệu được cắt thành các **segment** nhỏ
-- Mỗi segment được đánh số (sequence number)
-- Người nhận xác nhận đã nhận (acknowledgment)
-- Nếu mất gói tin → gửi lại tự động
+**IP** là "hệ thống địa chỉ" — mỗi máy có một địa chỉ IP duy nhất, giống như địa chỉ nhà. IP biết "gói hàng này phải đến đâu".
 
-**IP (Internet Protocol)** đóng vai trò như hệ thống bưu điện: nó biết cách định tuyến từng phong bì từ địa chỉ nguồn đến địa chỉ đích, dù phải qua nhiều trạm trung gian.
-
-**TCP/IP** là sự kết hợp: IP lo việc định tuyến, TCP lo việc đảm bảo dữ liệu đến đúng và đủ.
+**UDP** thì ngược lại — gửi rất nhanh nhưng không đảm bảo (như gửi tin nhắn, mất thì thôi). Dùng cho video call, game online.
 
 ---
 
 ## Giải thích cho người đã biết lập trình (nâng cao)
 
-### TCP là giao thức connection-oriented, reliable, ordered
+### TCP — Transmission Control Protocol
 
-TCP hoạt động ở **Transport Layer (Layer 4)** của mô hình OSI, cung cấp:
-- **Reliable delivery**: mọi byte đều được xác nhận, mất thì gửi lại
-- **Ordered delivery**: dữ liệu đến đúng thứ tự nhờ sequence number
-- **Flow control**: tránh sender làm ngập receiver
-- **Congestion control**: tránh làm nghẽn mạng
+TCP là **connection-oriented**, **reliable**, **ordered** protocol chạy ở Transport Layer (L4).
 
-### TCP Header Structure (20 bytes tối thiểu)
+#### Three-Way Handshake (Kết nối)
 
 ```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|          Source Port          |       Destination Port        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        Sequence Number                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                    Acknowledgment Number                      |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  Data |           |U|A|P|R|S|F|                               |
-| Offset| Reserved  |R|C|S|S|Y|I|            Window             |
-|       |           |G|K|H|T|N|N|                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|           Checksum            |         Urgent Pointer        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                    Options (nếu có)                           |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+Client                    Server
+  |                          |
+  |------- SYN (seq=x) ----> |   Client muốn kết nối, gửi số sequence ngẫu nhiên x
+  |                          |
+  |<-- SYN-ACK (seq=y, ack=x+1) -- |   Server đồng ý, gửi số sequence y + ACK x+1
+  |                          |
+  |--- ACK (seq=x+1, ack=y+1) --> |   Client xác nhận, kết nối thiết lập
+  |                          |
+  |======= Data Transfer ========>|
 ```
 
-Các field quan trọng:
-- **Source/Destination Port** (16-bit mỗi cái): xác định process trên host
-- **Sequence Number** (32-bit): số thứ tự byte đầu tiên trong segment này
-- **Acknowledgment Number** (32-bit): byte tiếp theo mà receiver mong muốn nhận
-- **Window Size** (16-bit): số byte receiver có thể nhận thêm (flow control)
-- **Flags** (6-bit): URG, ACK, PSH, RST, SYN, FIN
-- **Checksum** (16-bit): kiểm tra lỗi header + data
+Tại sao cần 3 bước thay vì 2? Vì cần xác nhận **cả hai chiều** đều có thể gửi và nhận.
 
-### 3-Way Handshake — Thiết lập kết nối
+#### Four-Way Termination (Đóng kết nối)
 
 ```
-Client                          Server
-  |                               |
-  |  SYN (seq=x)                  |
-  |------------------------------>|   [Client: SYN_SENT]
-  |                               |   [Server: SYN_RECEIVED]
-  |  SYN-ACK (seq=y, ack=x+1)    |
-  |<------------------------------|
-  |  [Client: ESTABLISHED]        |
-  |  ACK (ack=y+1)                |
-  |------------------------------>|   [Server: ESTABLISHED]
-  |                               |
-  |  (Truyền dữ liệu)             |
+Client                    Server
+  |--- FIN ----------------> |   Client muốn đóng
+  |<-- ACK ---------------- |   Server xác nhận
+  |<-- FIN ---------------- |   Server cũng muốn đóng
+  |--- ACK ----------------> |   Client xác nhận → TIME_WAIT 2MSL
 ```
 
-- **SYN**: Client gửi ISN (Initial Sequence Number) x ngẫu nhiên
-- **SYN-ACK**: Server xác nhận x+1, đồng thời gửi ISN y của mình
-- **ACK**: Client xác nhận y+1 — kết nối hai chiều được thiết lập
+**TIME_WAIT**: Client chờ 2×MSL (Maximum Segment Lifetime ≈ 60–120s) để đảm bảo ACK cuối đến Server.
 
-ISN ngẫu nhiên để chống **TCP sequence prediction attack**.
+#### Reliability Mechanisms
 
-### 4-Way Termination — Đóng kết nối
+| Cơ chế | Mô tả |
+|--------|-------|
+| Sequence number | Đánh số từng byte, bên nhận sắp xếp lại đúng thứ tự |
+| ACK (Acknowledgment) | Bên nhận xác nhận đã nhận đến byte nào |
+| Retransmission | Nếu không nhận ACK sau timeout → gửi lại |
+| Checksum | Phát hiện lỗi bit trong segment |
+| Duplicate detection | Số sequence giúp phát hiện và bỏ duplicate |
 
-```
-Client                          Server
-  |                               |
-  |  FIN (seq=u)                  |
-  |------------------------------>|   [Client: FIN_WAIT_1]
-  |                               |   [Server: CLOSE_WAIT]
-  |  ACK (ack=u+1)                |
-  |<------------------------------|   [Client: FIN_WAIT_2]
-  |                               |
-  |  (Server tiếp tục gửi data)   |
-  |                               |
-  |  FIN (seq=v)                  |
-  |<------------------------------|   [Server: LAST_ACK]
-  |  [Client: TIME_WAIT 2*MSL]    |
-  |  ACK (ack=v+1)                |
-  |------------------------------>|   [Server: CLOSED]
-  |  (Sau 2*MSL)                  |
-  |  [Client: CLOSED]             |
-```
+#### Flow Control — Sliding Window
 
-**TIME_WAIT** (2 * MSL = 2 * 60s = 120s): Chờ để đảm bảo ACK cuối cùng đến nơi và các segment cũ trong mạng hết hạn. Đây là lý do tại sao restart server nhanh đôi khi gặp lỗi "Address already in use" → dùng `SO_REUSEADDR`.
-
-### Flow Control — Sliding Window
+Tránh sender gửi quá nhanh làm receiver bị tràn bộ nhớ (buffer overflow):
 
 ```
-Sender window size = min(receiver_window, congestion_window)
-
-Receiver quảng bá rwnd (receive window) trong mỗi ACK:
-  rwnd = receive_buffer_size - (LastByteRcvd - LastByteRead)
-
-Sender không được gửi quá:
-  LastByteSent - LastByteAcked <= min(cwnd, rwnd)
+Receiver advertises: rwnd = 64KB  (còn 64KB buffer)
+Sender có thể gửi tối đa 64KB mà không cần chờ ACK
+Sau mỗi ACK, window slide forward
 ```
 
-- Receiver buffer đầy → rwnd = 0 → sender dừng gửi
-- Receiver đọc xong dữ liệu → gửi Window Update
+#### Congestion Control
 
-**Zero Window Probe**: Sender định kỳ gửi 1 byte để hỏi xem window đã mở chưa.
+Tránh làm nghẽn mạng khi nhiều sender cùng gửi:
 
-### Congestion Control — 4 Thuật toán
+| Phase | Cơ chế | Mô tả |
+|-------|--------|-------|
+| Slow Start | cwnd = 1 MSS, tăng gấp đôi mỗi RTT | Khởi đầu thận trọng |
+| Congestion Avoidance | cwnd tăng +1 MSS mỗi RTT | Sau khi vượt ssthresh |
+| Fast Retransmit | 3 duplicate ACKs → gửi lại ngay | Không cần chờ timeout |
+| Fast Recovery | Giảm cwnd xuống một nửa (thay vì về 1) | Sau fast retransmit |
 
-**1. Slow Start**
-```
-cwnd = 1 MSS
-mỗi ACK nhận được: cwnd += 1 MSS  (tăng theo hàm mũ)
-khi cwnd >= ssthresh: chuyển sang Congestion Avoidance
-```
+**AIMD (Additive Increase, Multiplicative Decrease):** tăng tuyến tính, giảm theo hệ số (×0.5 khi mất gói).
 
-**2. Congestion Avoidance**
-```
-mỗi RTT (sau khi nhận đủ ACK của 1 window): cwnd += 1 MSS  (tăng tuyến tính)
-```
+#### TCP Header quan trọng
 
-**3. Fast Retransmit**
 ```
-Nhận 3 duplicate ACKs → mất gói → gửi lại ngay (không chờ timeout)
-ssthresh = cwnd / 2
-cwnd = ssthresh + 3 MSS
+Source Port (16 bit) | Destination Port (16 bit)
+Sequence Number (32 bit)
+Acknowledgment Number (32 bit)
+Data Offset | Flags (SYN, ACK, FIN, RST, PSH, URG) | Window Size
+Checksum | Urgent Pointer
+Options (MSS, Window Scale, SACK, Timestamps)
 ```
 
-**4. AIMD (Additive Increase, Multiplicative Decrease)**
-- Tăng: cộng thêm 1 MSS mỗi RTT (additive increase)
-- Giảm: chia đôi khi phát hiện mất gói (multiplicative decrease)
+### UDP — User Datagram Protocol
 
-### Well-Known Port Numbers
+- **Connectionless**: không có handshake, không trạng thái
+- **Unreliable**: không đảm bảo giao hàng, không đảm bảo thứ tự
+- **Low overhead**: header chỉ 8 bytes (vs TCP 20+ bytes)
+- **No congestion control**: gửi nhanh nhất có thể
 
-| Port | Giao thức | Mô tả |
-|------|-----------|-------|
-| 20   | FTP-Data  | FTP data transfer |
-| 21   | FTP       | FTP control |
-| 22   | SSH       | Secure Shell |
-| 23   | Telnet    | Remote terminal (không mã hóa) |
-| 25   | SMTP      | Gửi email |
-| 53   | DNS       | Domain Name System |
-| 67/68| DHCP      | Dynamic Host Configuration |
-| 80   | HTTP      | Web không mã hóa |
-| 110  | POP3      | Nhận email |
-| 143  | IMAP      | Nhận email (sync) |
-| 443  | HTTPS     | Web mã hóa TLS |
-| 3306 | MySQL     | Database |
-| 5432 | PostgreSQL| Database |
-| 6379 | Redis     | Cache |
-| 27017| MongoDB   | Database |
+### IP — Internet Protocol
+
+**IPv4:**
+- 32-bit address, viết dạng 4 octet: `192.168.1.1`
+- Tổng ≈ 4.3 tỷ địa chỉ (đã hết từ 2011)
+- Có NAT (Network Address Translation) để "chia sẻ" IP
+
+**IPv6:**
+- 128-bit address: `2001:0db8:85a3:0000:0000:8a2e:0370:7334`
+- Tổng ≈ 3.4 × 10³⁸ địa chỉ
+- Không cần NAT
+- Built-in IPSec
+
+**Subnetting & CIDR:**
+
+```
+192.168.1.0/24
+  ├── Network: 192.168.1.0
+  ├── Subnet Mask: 255.255.255.0
+  ├── Host range: 192.168.1.1 – 192.168.1.254
+  ├── Broadcast: 192.168.1.255
+  └── Số host: 2^8 - 2 = 254
+
+10.0.0.0/8    → 16.7 triệu hosts
+172.16.0.0/12 → 1 triệu hosts
+192.168.0.0/16 → 65,534 hosts (private ranges)
+```
+
+### Ports & Sockets
+
+- **Well-known ports** (0–1023): FTP=21, SSH=22, Telnet=23, SMTP=25, DNS=53, HTTP=80, HTTPS=443
+- **Registered ports** (1024–49151): MySQL=3306, PostgreSQL=5432, Redis=6379, MongoDB=27017
+- **Dynamic/Ephemeral ports** (49152–65535): OS gán cho client connections
+
+**Socket = (IP, Port, Protocol)** — định danh duy nhất của một connection.
 
 ---
 
 ## Định nghĩa chính xác
 
-**TCP (Transmission Control Protocol)**: Giao thức tầng transport (RFC 793, cập nhật RFC 9293) cung cấp truyền dữ liệu tin cậy, có thứ tự, kiểm soát luồng và kiểm soát tắc nghẽn giữa hai tiến trình trên mạng IP.
+**TCP** (Transmission Control Protocol, RFC 9293): connection-oriented, reliable, stream-based transport protocol. Đảm bảo delivery, ordering, và error checking.
 
-**IP (Internet Protocol)**: Giao thức tầng network (RFC 791 cho IPv4, RFC 8200 cho IPv6) cung cấp định địa chỉ và định tuyến best-effort (không đảm bảo độ tin cậy) giữa các host.
+**UDP** (User Datagram Protocol, RFC 768): connectionless, unreliable, datagram-based transport protocol. Cung cấp minimal service — multiplexing qua port và checksum tùy chọn.
 
-**MSS (Maximum Segment Size)**: Kích thước tối đa của TCP payload trong một segment, thường = MTU - 40 bytes (IP header 20 + TCP header 20). Ethernet MTU = 1500 → MSS = 1460 bytes.
-
-**RTT (Round-Trip Time)**: Thời gian để một packet đi từ sender đến receiver và ACK trở về.
+**IP** (Internet Protocol, RFC 791 cho IPv4, RFC 8200 cho IPv6): network-layer protocol xử lý logical addressing và packet routing. Connectionless và best-effort delivery.
 
 ---
 
-## Bảng / Sơ đồ kỹ thuật
+## Đặc điểm kỹ thuật / So sánh TCP vs UDP
 
-### TCP vs UDP So sánh đầy đủ
-
-| Tiêu chí | TCP | UDP |
-|----------|-----|-----|
+| Đặc điểm | TCP | UDP |
+|-----------|-----|-----|
 | Connection | Connection-oriented (3-way handshake) | Connectionless |
-| Reliability | Guaranteed (ACK + retransmit) | Best-effort, có thể mất gói |
-| Ordering | Đảm bảo thứ tự | Không đảm bảo |
-| Flow Control | Có (sliding window) | Không |
-| Congestion Control | Có (slow start, AIMD) | Không |
+| Reliability | Đảm bảo (ACK + retransmission) | Không đảm bảo |
+| Ordering | Có (sequence number) | Không |
+| Flow control | Có (sliding window) | Không |
+| Congestion control | Có (slow start, AIMD) | Không |
 | Header size | 20–60 bytes | 8 bytes |
-| Speed | Chậm hơn (overhead) | Nhanh hơn |
-| Use cases | HTTP, FTP, SSH, email | DNS, DHCP, streaming, gaming, VoIP |
-| Broadcast/Multicast | Không hỗ trợ | Hỗ trợ |
-
-### TCP State Machine
-
-```
-                  CLOSED
-                 /      \
-         [passive    [active
-          open]       open]
-               |      |
-           LISTEN   SYN_SENT
-               |      |
-       [SYN]  |      | [SYN+ACK]
-               |      |
-         SYN_RECEIVED  |
-               |      |
-         [ACK] |      | [ACK]
-               \      /
-              ESTABLISHED
-              /          \
-   [close]  /            \ [close/FIN]
-            |              |
-       FIN_WAIT_1      CLOSE_WAIT
-            |              |
-       FIN_WAIT_2      LAST_ACK
-            |              |
-        TIME_WAIT -------> CLOSED
-            |
-          CLOSED
-```
+| Overhead | Cao | Thấp |
+| Latency | Cao hơn | Thấp hơn |
+| Use case | HTTP, SMTP, FTP, SSH | DNS, VoIP, video stream, gaming |
+| Throughput | Thấp hơn (do ACK) | Cao hơn |
+| Broadcast/Multicast | Không | Có |
 
 ---
 
 ## Code mẫu
 
-### TCP Server và Client cơ bản (Python)
-
 ```python
-# tcp_server.py
 import socket
 import threading
 
-def handle_client(conn, addr):
-    """Xử lý từng client trong thread riêng"""
-    print(f"[+] Kết nối từ {addr}")
-    try:
-        while True:
-            # recv() blocking: chờ tối đa 1024 bytes
-            data = conn.recv(1024)
-            if not data:
-                break  # Client đã đóng kết nối
-            
-            message = data.decode('utf-8')
-            print(f"[{addr}] Nhận: {message}")
-            
-            # Echo lại dữ liệu
-            response = f"Server echo: {message}"
-            conn.sendall(response.encode('utf-8'))
-    finally:
-        conn.close()
-        print(f"[-] Đóng kết nối {addr}")
+# ══════════════════════════════════════════════
+# TCP Echo Server + Client
+# ══════════════════════════════════════════════
 
-def start_server(host='127.0.0.1', port=9999):
-    # AF_INET = IPv4, SOCK_STREAM = TCP
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        # Tránh lỗi "Address already in use" khi restart
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        server.bind((host, port))
-        server.listen(5)  # backlog = 5 (hàng đợi SYN)
-        print(f"[*] Server đang lắng nghe tại {host}:{port}")
-        
-        while True:
-            conn, addr = server.accept()  # Blocking: chờ kết nối mới
-            # Mỗi client chạy trong thread riêng
-            t = threading.Thread(target=handle_client, args=(conn, addr))
-            t.daemon = True
-            t.start()
+def tcp_server(host='127.0.0.1', port=9000):
+    """TCP Server: lắng nghe và echo lại"""
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind((host, port))
+    server_sock.listen(5)
+    print(f"[TCP Server] Listening on {host}:{port}")
 
-if __name__ == '__main__':
-    start_server()
-```
+    conn, addr = server_sock.accept()
+    print(f"[TCP Server] Connected by {addr}")
 
-```python
-# tcp_client.py
-import socket
+    while True:
+        data = conn.recv(1024)
+        if not data:
+            break
+        print(f"[TCP Server] Received: {data.decode()}")
+        conn.sendall(data)  # echo lại
 
-def start_client(host='127.0.0.1', port=9999):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-        # 3-way handshake xảy ra ở đây
-        client.connect((host, port))
-        print(f"[+] Đã kết nối đến {host}:{port}")
-        
-        messages = ["Xin chào!", "TCP/IP test", "bye"]
-        for msg in messages:
-            client.sendall(msg.encode('utf-8'))
-            response = client.recv(1024).decode('utf-8')
-            print(f"Server trả lời: {response}")
-        
-    # with block thoát → close() → FIN/ACK tự động
+    conn.close()
+    server_sock.close()
 
-if __name__ == '__main__':
-    start_client()
-```
 
-### Xem TCP connections trên Linux
+def tcp_client(host='127.0.0.1', port=9000):
+    """TCP Client: kết nối và gửi message"""
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_sock.connect((host, port))  # three-way handshake xảy ra ở đây
 
-```bash
-# Xem tất cả TCP connections
-ss -tnp
+    messages = ["Hello, TCP!", "Second message", "Third"]
+    for msg in messages:
+        client_sock.sendall(msg.encode())
+        response = client_sock.recv(1024)
+        print(f"[TCP Client] Echo: {response.decode()}")
 
-# Xem trạng thái TIME_WAIT
-ss -tn state time-wait
+    client_sock.close()  # four-way termination xảy ra ở đây
 
-# Xem port đang listen
-ss -tlnp
 
-# Dùng netstat (cũ hơn)
-netstat -tnp
+# ══════════════════════════════════════════════
+# UDP Echo Server + Client
+# ══════════════════════════════════════════════
 
-# Bắt gói TCP để quan sát 3-way handshake
-sudo tcpdump -i lo -n tcp port 9999 -S
-```
+def udp_server(host='127.0.0.1', port=9001):
+    """UDP Server: không cần handshake"""
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_sock.bind((host, port))
+    print(f"[UDP Server] Listening on {host}:{port}")
 
-### Phân tích TCP với Python (scapy)
+    data, addr = server_sock.recvfrom(1024)
+    print(f"[UDP Server] Received from {addr}: {data.decode()}")
+    server_sock.sendto(data, addr)
+    server_sock.close()
 
-```python
-from scapy.all import *
 
-# Bắt 10 gói TCP
-packets = sniff(filter="tcp port 80", count=10)
-for pkt in packets:
-    if TCP in pkt:
-        tcp = pkt[TCP]
-        flags = tcp.flags
-        print(f"Seq={tcp.seq}, Ack={tcp.ack}, Flags={flags}, Win={tcp.window}")
+def udp_client(host='127.0.0.1', port=9001):
+    """UDP Client: gửi không cần connect trước"""
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client_sock.sendto(b"Hello, UDP!", (host, port))
+    data, _ = client_sock.recvfrom(1024)
+    print(f"[UDP Client] Echo: {data.decode()}")
+    client_sock.close()
+
+
+# ══════════════════════════════════════════════
+# IP / Network utilities
+# ══════════════════════════════════════════════
+import ipaddress
+
+def subnet_info(cidr: str):
+    """Phân tích thông tin subnet từ CIDR notation"""
+    network = ipaddress.IPv4Network(cidr, strict=False)
+    print(f"Network:    {network.network_address}")
+    print(f"Broadcast:  {network.broadcast_address}")
+    print(f"Netmask:    {network.netmask}")
+    print(f"Num hosts:  {network.num_addresses - 2}")
+    print(f"First host: {list(network.hosts())[0]}")
+    print(f"Last host:  {list(network.hosts())[-1]}")
+
+subnet_info("192.168.1.0/24")
+subnet_info("10.0.0.0/8")
+
+# ── Chạy TCP demo
+# server_thread = threading.Thread(target=tcp_server)
+# server_thread.start()
+# tcp_client()
 ```
 
 ---
 
 ## Khi nào dùng / Khi nào KHÔNG dùng
 
-**Dùng TCP khi:**
-- Cần đảm bảo dữ liệu đến đúng và đủ (HTTP, file transfer, database)
-- Thứ tự dữ liệu quan trọng (streaming media với buffering)
-- Ứng dụng không thể tự xử lý mất gói
-- Email (SMTP, IMAP, POP3)
-- Remote access (SSH, Telnet)
+**TCP — dùng khi:**
+- Dữ liệu phải đến đầy đủ, đúng thứ tự: web (HTTP), email (SMTP/IMAP), file transfer (FTP/SFTP)
+- Cần reliability: database queries, API calls, SSH
+- Không ưu tiên tốc độ tuyệt đối
 
-**Dùng UDP thay vì TCP khi:**
-- Cần độ trễ thấp hơn tính tin cậy (game real-time, VoIP)
-- Ứng dụng tự xử lý mất gói (video call chấp nhận frame drop)
-- DNS lookup (query nhỏ, retry ở application layer)
-- Broadcast/Multicast (không thể dùng TCP)
-- QUIC (HTTP/3) tự xây reliable transport trên UDP
+**TCP — không dùng khi:**
+- Real-time audio/video (VoIP, video call) — packet cũ đến trễ còn tệ hơn mất hẳn
+- Gaming (latency quan trọng hơn reliability)
+- DNS (query nhỏ, UDP đủ dùng, dùng TCP chỉ khi response > 512 bytes)
 
-**Không dùng TCP khi:**
-- Dữ liệu nhỏ, nhiều lần, delay quan trọng hơn reliability
-- Cần multicast
-- IoT sensor gửi metric mà mất vài gói không sao
+**UDP — dùng khi:**
+- Latency quan trọng hơn reliability
+- Ứng dụng có thể tự xử lý mất gói (video codec tự recover)
+- Multicast/Broadcast (streaming IPTV, mDNS)
+- DNS, DHCP, SNMP
+
+---
+
+## So sánh với giao thức liên quan
+
+| | TCP | UDP | QUIC | SCTP |
+|-|-----|-----|------|------|
+| Transport | TCP | UDP | UDP | IP trực tiếp |
+| Reliable | Có | Không | Có | Có |
+| Multiplexing | Không | Không | Có (streams) | Có |
+| HOL blocking | Có | Không | Không | Không |
+| Use case | General | Real-time | HTTP/3 | Telecom |
 
 ---
 
 ## Lỗi thường gặp (Common Pitfalls)
 
-1. **"Address already in use"**: Quên set `SO_REUSEADDR` trước `bind()`. Xảy ra do TIME_WAIT state sau khi đóng server.
-
-2. **Partial send**: `send()` không đảm bảo gửi hết dữ liệu. Luôn dùng `sendall()` hoặc kiểm tra return value.
-
-3. **recv() không có delimiter**: TCP là byte stream, không có khái niệm "message boundary". Phải tự thiết kế protocol (length-prefix, newline delimiter...).
-
-4. **Blocking forever**: `accept()` và `recv()` block vô hạn. Nên set timeout: `socket.settimeout(30)`.
-
-5. **Half-open connection**: Một bên crash mà không gửi FIN → bên kia không biết. Dùng `SO_KEEPALIVE` hoặc application-level heartbeat.
-
-6. **Nagle's Algorithm**: Tự động buffer các packet nhỏ để gộp. Gây delay với ứng dụng cần low-latency. Tắt bằng `TCP_NODELAY`.
-
-7. **SYN flood attack**: Server tạo half-open connection cho mỗi SYN → cạn kiệt bộ nhớ. Giải pháp: SYN Cookies.
-
-8. **Nhầm lẫn sequence number**: ACK number = sequence number của segment nhận được + length của data (không phải +1 trừ khi SYN/FIN).
+- **TIME_WAIT quá nhiều**: server xử lý nhiều connection ngắn sẽ bị hết ephemeral ports. Giải pháp: `SO_REUSEADDR`, `TCP_QUICKACK`, hoặc connection pooling.
+- **Không đặt TCP_NODELAY cho game/VoIP**: mặc định Nagle's algorithm gộp các packet nhỏ → thêm latency không cần thiết.
+- **Nhầm tưởng TCP đảm bảo toàn vẹn ứng dụng**: TCP chỉ đảm bảo byte stream đến nguyên vẹn, không đảm bảo message boundary. Phải tự implement framing (length prefix, delimiter).
+- **UDP "mất gói là ổn"**: nếu 30% gói bị mất, video call vẫn crash. Phải implement FEC (Forward Error Correction) hoặc NACK.
+- **Không tắt connection**: không close socket sau khi dùng → resource leak, port exhaustion.
+- **Hardcode port 80/443**: process thường cần quyền root để bind port < 1024. Dùng reverse proxy (Nginx) thay thế.
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-1. **Giải thích 3-way handshake và tại sao cần đúng 3 bước?**
-   - 2 bước không đủ: Client không biết Server có nhận được ISN của mình không; cần ACK để xác nhận 2 chiều.
-
-2. **Tại sao TCP termination cần 4 bước thay vì 3 bước?**
-   - Vì TCP là full-duplex. Mỗi chiều phải đóng riêng (FIN + ACK). Server có thể vẫn còn data để gửi sau khi nhận FIN của Client.
-
-3. **TIME_WAIT là gì và tại sao cần thiết?**
-   - Đảm bảo ACK cuối cùng đến được Server và các segment cũ (delayed duplicates) hết hạn trên mạng. Thời gian = 2 * MSL (Maximum Segment Lifetime).
-
-4. **Sự khác biệt giữa flow control và congestion control?**
-   - Flow control: tránh receiver bị ngập (sender ↔ receiver). Congestion control: tránh mạng bị nghẽn (sender ↔ network).
-
-5. **Slow start có thực sự "chậm" không?**
-   - Không chậm theo nghĩa tuyến tính. Tăng theo hàm mũ (exponential) đến ssthresh, sau đó mới tuyến tính. Gọi là "slow" vì bắt đầu từ cwnd=1 thay vì full bandwidth.
-
-6. **Tại sao UDP nhanh hơn TCP?**
-   - Không handshake, không ACK, không retransmit, không flow/congestion control, header nhỏ hơn (8 vs 20 bytes).
-
-7. **TCP có đảm bảo data không bị corrupted không?**
-   - Có checksum nhưng chỉ 16-bit, không đủ mạnh. Ứng dụng cần TLS hoặc application-level integrity check.
-
-8. **Điều gì xảy ra khi gửi data qua TCP connection đã bị đóng?**
-   - Nhận `RST` (Connection Reset) → exception `ConnectionResetError` hoặc `BrokenPipeError`.
+- Giải thích TCP three-way handshake. Tại sao cần 3 bước thay vì 2?
+- TCP four-way termination là gì? Tại sao cần 4 bước?
+- TCP vs UDP — phân biệt và ví dụ use case.
+- Flow control vs Congestion control khác nhau như thế nào?
+- Slow start trong TCP congestion control hoạt động như thế nào?
+- TIME_WAIT là gì? Tại sao tồn tại? Xử lý ra sao khi có quá nhiều?
+- Subnetting: `/24` có bao nhiêu host? `/16`?
+- IPv4 vs IPv6 — tại sao cần chuyển sang IPv6?
+- Well-known port của HTTP, HTTPS, SSH, DNS là gì?
+- Nagle's algorithm là gì? Khi nào cần tắt nó?

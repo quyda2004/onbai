@@ -2,330 +2,321 @@
 
 ---
 
-## Giải thích cho người mới hoàn toàn
+## Giải thích cho người mới
 
-Linux coi mọi thứ gần như là văn bản (text). Config của phần mềm là text, logs là text, danh sách process là text. Vì vậy, biết cách lọc, tìm kiếm, và biến đổi text là kỹ năng cực kỳ quan trọng.
-
-Hãy nghĩ như đang xử lý một cuốn sách khổng lồ:
-- `cat` = đọc toàn bộ cuốn sách ra màn hình
-- `head`/`tail` = chỉ đọc vài trang đầu/cuối
-- `grep` = máy tìm kiếm từ khóa — bôi vàng những dòng chứa từ bạn cần
-- `sed` = bút xóa + bút viết — tìm từ/cụm từ và thay thế
-- `awk` = máy tính + bộ lọc thông minh — xử lý từng "cột" trong bảng
-
-Sức mạnh thật sự đến từ việc nối các lệnh này lại bằng dấu `|` (pipe). Giống như dây chuyền sản xuất: văn bản chạy qua từng máy, mỗi máy làm một việc.
+Trong Linux, hầu hết mọi thứ là **text file** (config, logs, code...). Vì vậy Linux có rất nhiều công cụ xử lý text mạnh mẽ. Thay vì mở Word/Notepad để đọc log, bạn dùng terminal để:
+- Tìm kiếm (`grep`) — như Ctrl+F trong notepad nhưng mạnh hơn nhiều
+- Thay thế (`sed`) — như Find & Replace nhưng có thể tự động hóa
+- Tính toán theo cột (`awk`) — như Excel nhưng từ terminal
 
 ---
 
-## Giải thích cho người đã biết lập trình (nâng cao)
+## Giải thích nâng cao
 
-**Triết lý Unix:** Mỗi công cụ làm một việc tốt, input/output là text stream. Pipe (`|`) kết nối stdout của lệnh này với stdin của lệnh kia. Đây là functional programming style: compose small pure functions.
+**Pipeline philosophy**: mỗi công cụ làm **một việc tốt**, kết hợp qua pipe (`|`). Đây là Unix philosophy — nhỏ, chuyên biệt, có thể kết hợp.
 
-**`grep` và regex engine:** `grep` dùng POSIX BRE (Basic Regular Expressions) mặc định. `-E` hoặc `egrep` dùng ERE (Extended: `+`, `?`, `|`, `()` không cần escape). `-P` dùng PCRE (Perl-compatible: lookahead, lookbehind, `\d`, `\w`). Performance: `grep` là C code tối ưu với Boyer-Moore-Horspool algorithm — nhanh hơn Python/Ruby grep nhiều lần.
-
-**`sed` là stream editor:** Đọc từng dòng vào pattern space, thực hiện commands, output. `-i` edit in-place (thực ra tạo file tạm rồi rename). `-n` suppress automatic print. Address có thể là line number, regex, hoặc range `first~step`.
-
-**`awk` là programming language:** Có built-in arrays, math functions, string functions, regex. Pattern/action model: `condition { action }`. Cực mạnh cho tabular data. `gawk` (GNU awk) thêm nhiều features.
-
-**`xargs` và parallel execution:** `xargs` convert stdin thành arguments. `-P N` chạy N processes song song — cực kỳ hữu ích khi cần process nhiều file. `-n 1` mỗi lần một argument.
+**Regular Expressions (Regex)**: ngôn ngữ mô tả pattern. `grep`, `sed`, `awk` đều dùng regex. BRE (Basic RE) và ERE (Extended RE, dùng `-E`) có syntax hơi khác nhau.
 
 ---
 
-## Các lệnh / Cú pháp chính
+## BẢNG LỆNH THỰC HÀNH
 
-| Lệnh | Mô tả | Ví dụ |
-|------|-------|-------|
-| `cat file` | In nội dung file | `cat /etc/hosts` |
-| `cat -n file` | In với số dòng | `cat -n script.sh` |
-| `less file` | Xem file có thể scroll | `less /var/log/syslog` |
-| `head -n 20 file` | 20 dòng đầu | `head -n 5 /etc/passwd` |
-| `tail -n 20 file` | 20 dòng cuối | `tail -n 100 app.log` |
-| `tail -f file` | Theo dõi file realtime | `tail -f /var/log/nginx/access.log` |
-| `tail -F file` | Theo dõi, kể cả khi file rotate | `tail -F /var/log/syslog` |
-| `grep "pattern" file` | Tìm dòng chứa pattern | `grep "ERROR" app.log` |
-| `grep -r "pattern" dir/` | Tìm đệ quy | `grep -r "TODO" /src/` |
-| `grep -i "pattern"` | Không phân biệt hoa/thường | `grep -i "error" log` |
-| `grep -v "pattern"` | Đảo ngược — không chứa | `grep -v "DEBUG" app.log` |
-| `grep -n "pattern"` | Hiện số dòng | `grep -n "def " script.py` |
-| `grep -c "pattern"` | Đếm số dòng match | `grep -c "ERROR" app.log` |
-| `grep -l "pattern"` | Chỉ in tên file | `grep -rl "TODO" /src/` |
-| `grep -A 3 "pattern"` | In thêm 3 dòng sau match | `grep -A 5 "Exception" log` |
-| `grep -B 3 "pattern"` | In thêm 3 dòng trước match | `grep -B 2 "ERROR" log` |
-| `grep -C 3 "pattern"` | 3 dòng trước và sau | `grep -C 3 "crash" log` |
-| `sed 's/old/new/g' file` | Thay thế toàn bộ | `sed 's/foo/bar/g' file.txt` |
-| `sed -i 's/old/new/g' file` | Sửa in-place | `sed -i 's/localhost/0.0.0.0/g' config` |
-| `sed -n '10,20p' file` | In dòng 10–20 | `sed -n '5,10p' file.txt` |
-| `sed '/pattern/d' file` | Xóa dòng chứa pattern | `sed '/^#/d' config.txt` |
-| `awk '{print $1}' file` | In cột đầu | `awk '{print $1}' /etc/passwd` |
-| `awk -F: '{print $1}' file` | Dùng : làm delimiter | `awk -F: '{print $1,$3}' /etc/passwd` |
-| `awk 'NR==5' file` | In dòng thứ 5 | `awk 'NR==5' file.txt` |
-| `cut -d: -f1 file` | Cắt cột với delimiter | `cut -d: -f1 /etc/passwd` |
-| `sort file` | Sắp xếp | `sort names.txt` |
-| `sort -n file` | Sắp xếp số | `sort -n numbers.txt` |
-| `sort -rn file` | Số, đảo ngược | `sort -rn scores.txt` |
-| `sort -k2 file` | Sort theo cột 2 | `sort -k2 data.txt` |
-| `sort -u file` | Sort + unique | `sort -u names.txt` |
-| `uniq file` | Loại bỏ dòng liên tiếp trùng | `sort file \| uniq` |
-| `uniq -c file` | Đếm số lần xuất hiện | `sort log \| uniq -c \| sort -rn` |
-| `uniq -d file` | Chỉ dòng có duplicate | `sort names \| uniq -d` |
-| `wc -l file` | Đếm số dòng | `wc -l /etc/passwd` |
-| `wc -w file` | Đếm số từ | `wc -w document.txt` |
-| `tr 'a-z' 'A-Z'` | Translate characters | `echo "hello" \| tr 'a-z' 'A-Z'` |
-| `tr -d '\r'` | Xóa ký tự | `tr -d '\r' < windows.txt > unix.txt` |
-| `xargs` | Convert stdin → arguments | `find . -name "*.log" \| xargs rm` |
-
----
-
-## Ví dụ thực tế
-
+### grep — Global Regular Expression Print
 ```bash
-# ===== cat, head, tail =====
-cat /etc/passwd                      # xem toàn bộ
-cat file1.txt file2.txt > combined   # ghép file
-head -n 5 /etc/passwd                # 5 dòng đầu
-tail -n 20 /var/log/syslog           # 20 dòng cuối
-tail -f /var/log/nginx/access.log    # theo dõi log realtime (Ctrl+C để dừng)
-tail -F /var/log/app.log             # theo dõi kể cả khi logrotate tạo file mới
+# Cú pháp: grep [options] pattern [file...]
 
-# ===== grep =====
-# Tìm cơ bản
-grep "ERROR" /var/log/app.log
-grep -i "error\|warning" /var/log/app.log    # -i: ignore case, \|: OR trong BRE
+grep "error" file.log          # tìm dòng chứa "error"
+grep "error" *.log             # tìm trong nhiều file
+grep -r "TODO" .               # tìm recursive trong thư mục
+grep -r "TODO" . --include="*.py"  # chỉ trong file .py
 
-# Regex
-grep "^user" /etc/passwd             # bắt đầu bằng "user"
-grep "\.py$" filelist.txt            # kết thúc bằng .py
-grep "[0-9]\{3\}" phone_list.txt     # chứa ít nhất 3 chữ số liên tiếp
-grep -E "[0-9]{3}-[0-9]{4}" phones   # ERE: không cần escape {}
+grep -i "error" file.log       # case-insensitive
+grep -v "debug" file.log       # inverse — dòng KHÔNG chứa "debug"
+grep -n "error" file.log       # hiện số dòng
+grep -c "error" file.log       # đếm số dòng match
+grep -l "TODO" *.py            # chỉ in tên file có match
+grep -L "TODO" *.py            # file KHÔNG có match
 
-# Tìm trong code
-grep -rn "TODO\|FIXME\|HACK" /src/ --include="*.py"
-grep -rl "password" /etc/ 2>/dev/null   # tìm file chứa "password"
+grep -A 3 "ERROR" file.log     # 3 dòng AFTER match
+grep -B 3 "ERROR" file.log     # 3 dòng BEFORE match
+grep -C 3 "ERROR" file.log     # 3 dòng context (before + after)
 
-# Context lines — hữu ích khi debug
-grep -C 5 "NullPointerException" app.log | tail -30
+grep -E "error|warning" file.log      # Extended RE: OR
+grep -E "^ERROR:" file.log            # bắt đầu dòng bằng ERROR:
+grep -E "[0-9]{3}-[0-9]{4}" file      # số điện thoại pattern
+grep -P "\d{4}-\d{2}-\d{2}" file      # Perl regex (PCRE)
 
-# Đếm errors theo loại
-grep -oE "ERROR [A-Z_]+" app.log | sort | uniq -c | sort -rn
+grep -w "log" file.txt         # whole word (không match "logging")
+grep -x "exact line" file      # toàn bộ dòng phải match
+grep -o "pattern" file         # chỉ in phần match (không cả dòng)
+grep -m 5 "error" file.log     # dừng sau 5 match
 
-# ===== sed =====
-# Thay thế cơ bản
-sed 's/foo/bar/' file.txt            # chỉ lần đầu trên mỗi dòng
-sed 's/foo/bar/g' file.txt           # tất cả occurrences
-sed 's/foo/bar/gi' file.txt          # case-insensitive, global
+# Với pipeline
+cat /var/log/auth.log | grep "Failed" | grep -v "test"
+ps aux | grep "nginx" | grep -v grep
+```
 
-# In-place edit với backup
-sed -i.bak 's/127.0.0.1/0.0.0.0/g' config.yaml
-# Tạo config.yaml.bak và sửa config.yaml
+**Regex cơ bản trong grep:**
+```
+.       bất kỳ ký tự nào
+*       0 hoặc nhiều ký tự trước
++       1 hoặc nhiều (cần -E)
+?       0 hoặc 1 (cần -E)
+^       đầu dòng
+$       cuối dòng
+[abc]   a hoặc b hoặc c
+[^abc]  không phải a, b, c
+[a-z]   a đến z
+\w      word character (= [a-zA-Z0-9_])
+\d      digit (cần -P)
+\s      whitespace
+```
+
+### sed — Stream EDitor
+```bash
+# Cú pháp: sed [options] 'command' [file]
+
+# Substitution (thay thế)
+sed 's/old/new/' file.txt         # thay lần đầu tiên trên mỗi dòng
+sed 's/old/new/g' file.txt        # thay tất cả (global)
+sed 's/old/new/2' file.txt        # thay lần thứ 2
+sed 's/old/new/gi' file.txt       # case-insensitive + global
+sed -i 's/old/new/g' file.txt     # edit in-place (sửa file gốc)
+sed -i.bak 's/old/new/g' file.txt # edit in-place + backup (.bak)
+sed -E 's/[0-9]+/NUM/g' file.txt  # Extended RE
 
 # Xóa dòng
-sed '/^#/d' config.txt               # xóa dòng comment
-sed '/^$/d' file.txt                 # xóa dòng trống
-sed '5d' file.txt                    # xóa dòng thứ 5
-sed '5,10d' file.txt                 # xóa dòng 5-10
+sed '/pattern/d' file.txt         # xóa dòng chứa pattern
+sed '/^$/d' file.txt              # xóa dòng trống
+sed '/^#/d' file.txt              # xóa comment lines
+sed '5d' file.txt                 # xóa dòng 5
+sed '5,10d' file.txt              # xóa dòng 5 đến 10
+sed '$d' file.txt                 # xóa dòng cuối
 
-# In dòng cụ thể
-sed -n '10,20p' file.txt             # in dòng 10-20
-sed -n '/START/,/END/p' file.txt     # in từ START đến END
+# In dòng
+sed -n '5p' file.txt              # chỉ in dòng 5
+sed -n '5,10p' file.txt           # in dòng 5 đến 10
+sed -n '/pattern/p' file.txt      # in dòng match pattern
 
 # Thêm dòng
-sed '5i\NEW LINE' file.txt           # chèn trước dòng 5
-sed '5a\NEW LINE' file.txt           # thêm sau dòng 5
-sed '$a\LAST LINE' file.txt          # thêm dòng cuối
+sed '5a\new line' file.txt        # thêm sau dòng 5
+sed '5i\new line' file.txt        # thêm trước dòng 5
+sed '/pattern/a\new line' file    # thêm sau dòng match pattern
 
-# Đổi tên hàng loạt (nội dung file)
-sed -i "s/v1\.0/v2\.0/g" *.yaml
+# Nhiều lệnh
+sed -e 's/foo/bar/g' -e 's/baz/qux/g' file.txt
+sed 's/foo/bar/g; s/baz/qux/g' file.txt
 
-# ===== awk =====
-# Cơ bản
-awk '{print $1}' file.txt            # in cột đầu (space là delimiter)
-awk -F: '{print $1, $3}' /etc/passwd # user và UID
-awk -F, '{print $2}' data.csv        # CSV cột thứ 2
+# Ứng dụng thực tế
+sed 's/http:/https:/g' config.txt       # đổi http thành https
+sed '/^#/d; /^$/d' config.txt           # bỏ comment và dòng trống
+sed 's/\s*$//g' file.txt               # bỏ trailing whitespace
+sed -n '100,200p' largefile.txt         # xem dòng 100-200
+```
+
+### awk — Xử lý file theo cột/record
+```bash
+# Cú pháp: awk [options] 'program' [file]
+# Mỗi dòng là 1 record, mỗi từ (space-separated) là 1 field
+# $0 = toàn dòng, $1 = cột 1, $2 = cột 2, $NF = cột cuối, NR = số dòng
+
+# In các cột
+awk '{print $1}' file.txt          # in cột 1
+awk '{print $1, $3}' file.txt      # in cột 1 và 3
+awk '{print $NF}' file.txt         # in cột cuối
+awk '{print NR, $0}' file.txt      # thêm số dòng
+
+# Delimiter tùy chỉnh
+awk -F: '{print $1, $3}' /etc/passwd     # : là delimiter
+awk -F',' '{print $2}' data.csv          # CSV
+awk 'BEGIN{FS=":"; OFS=","} {print $1,$3}' /etc/passwd  # đổi delimiter
 
 # Điều kiện
-awk '$3 > 1000' /etc/passwd          # user với UID > 1000
-awk '/ERROR/ {print $0}' app.log     # dòng chứa ERROR (giống grep)
-awk 'NR>=10 && NR<=20' file.txt      # dòng 10-20
+awk '$3 > 100' file.txt            # in dòng nếu cột 3 > 100
+awk '/pattern/ {print $2}' file    # in cột 2 của dòng match pattern
+awk 'NR==5' file.txt               # in dòng 5
+awk 'NR>=5 && NR<=10' file.txt     # in dòng 5-10
+awk '$1=="ERROR" {print}' log.txt  # cột 1 bằng "ERROR"
+awk 'length($0) > 80' file.txt     # dòng dài hơn 80 ký tự
 
 # Tính toán
-awk '{sum += $1} END {print "Total:", sum}' numbers.txt
-awk '{sum += $5; count++} END {print "Avg:", sum/count}' data.txt
+awk '{sum += $3} END {print sum}' data.txt      # tổng cột 3
+awk '{sum += $3; count++} END {print sum/count}' data.txt  # trung bình
+awk 'END {print NR}' file.txt      # đếm số dòng
 
-# BEGIN/END blocks
-awk 'BEGIN {print "=== Report ==="} 
-     /ERROR/ {count++} 
-     END {print "Total errors:", count}' app.log
+# BEGIN và END blocks
+awk 'BEGIN {print "Start"} {print $1} END {print "End"}' file.txt
 
-# Nhiều delimiters và format output
-awk -F: 'NR>1 {printf "User: %-15s UID: %d\n", $1, $3}' /etc/passwd
+# Ứng dụng thực tế
+ps aux | awk '{print $1, $2, $3}'                  # user, pid, cpu
+df -h | awk 'NR>1 {print $5, $6}'                  # disk usage %
+awk -F: '$3 >= 1000 {print $1}' /etc/passwd         # regular users (uid >= 1000)
+awk '{print $7}' access.log | sort | uniq -c | sort -rn | head -10  # top URLs
+cat /proc/cpuinfo | awk '/^model name/ {print; exit}'  # CPU model
+```
 
-# Field separator trong output
-awk -F: 'BEGIN {OFS=","} {print $1, $3, $6}' /etc/passwd > output.csv
+### sort — Sắp xếp
+```bash
+sort file.txt                  # sắp xếp alphabetically
+sort -r file.txt               # reverse
+sort -n file.txt               # numeric sort (1, 2, 10 thay vì 1, 10, 2)
+sort -rn file.txt              # numeric reverse
+sort -k2 file.txt              # sort theo cột 2
+sort -k2 -n file.txt           # sort theo cột 2, numeric
+sort -k2,2 -k1,1 file.txt      # sort theo cột 2, nếu bằng thì theo cột 1
+sort -t: -k3 -n /etc/passwd    # sort theo cột 3, delimiter :
+sort -u file.txt               # sort + loại bỏ duplicate (= sort | uniq)
+sort -h file.txt               # human-readable sort (10K, 1M, 2G)
+du -sh * | sort -rh            # files by size, lớn nhất đầu
+```
 
-# One-liner hữu ích: tính tổng cột 3 khi cột 1 = "SALE"
-awk '$1 == "SALE" {total += $3} END {print total}' sales.txt
+### uniq — Loại bỏ / Đếm duplicate (phải sort trước!)
+```bash
+sort file.txt | uniq           # loại bỏ duplicate lines
+sort file.txt | uniq -c        # đếm số lần xuất hiện
+sort file.txt | uniq -d        # chỉ in lines có duplicate
+sort file.txt | uniq -u        # chỉ in lines KHÔNG có duplicate
+sort file.txt | uniq -c | sort -rn  # sort by frequency
+sort file.txt | uniq -i        # case-insensitive
+```
 
-# ===== cut =====
-cut -d: -f1 /etc/passwd              # chỉ username
-cut -d: -f1,3 /etc/passwd            # username và UID
-cut -c1-10 file.txt                  # ký tự 1-10 của mỗi dòng
-cut -d',' -f2- data.csv              # từ cột 2 trở đi
+### cut — Cắt cột/ký tự
+```bash
+cut -d: -f1 /etc/passwd        # cột 1, delimiter :
+cut -d: -f1,3 /etc/passwd      # cột 1 và 3
+cut -d, -f2 data.csv           # cột 2 trong CSV
+cut -c1-5 file.txt             # ký tự 1 đến 5 của mỗi dòng
+cut -c5- file.txt              # từ ký tự 5 đến cuối
+```
 
-# ===== sort & uniq =====
-sort -t: -k3 -n /etc/passwd          # sort theo UID (cột 3, phân cách :)
-sort -k2,2 -k1,1 data.txt            # sort theo cột 2, tie-break theo cột 1
-sort -u names.txt                    # sort unique
+### tr — Translate/Delete ký tự
+```bash
+tr 'a-z' 'A-Z' < file.txt     # chuyển lowercase → uppercase
+tr 'A-Z' 'a-z' < file.txt     # chuyển uppercase → lowercase
+tr -d '\n' < file.txt          # xóa newlines
+tr -d ' ' < file.txt           # xóa spaces
+tr -s ' ' < file.txt           # replace multiple spaces thành 1
+tr ':' ',' < /etc/passwd       # thay : bằng ,
+tr -cd '[:print:]' < file      # xóa non-printable characters
+echo "hello world" | tr ' ' '\n'  # mỗi từ 1 dòng
+```
 
-# Pattern hay: đếm tần suất
-cat access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head -20
-# Top 20 IP addresses trong access log
+### paste — Merge files theo cột
+```bash
+paste file1.txt file2.txt      # merge 2 file theo cột (tab-separated)
+paste -d, file1.txt file2.txt  # delimiter ,
+paste -s file.txt              # merge tất cả dòng thành 1 dòng
+```
 
-# ===== tr =====
-echo "Hello World" | tr 'a-z' 'A-Z'  # HELLO WORLD
-echo "hello" | tr -d 'l'             # heo — xóa ký tự
-tr '\n' ',' < list.txt               # thay newline bằng comma
-cat file.txt | tr -s ' '             # squeeze multiple spaces thành 1
+### tee — Đọc stdin, ghi ra file VÀ stdout
+```bash
+command | tee output.txt               # ghi và tiếp tục pipeline
+command | tee output.txt | wc -l       # save + đếm dòng
+command | tee -a output.txt            # append mode
+command | tee file1 file2              # ghi ra nhiều file
+sudo command | tee /etc/config         # ghi file cần root qua sudo
+```
 
-# ===== wc =====
-wc -l /etc/passwd                    # số dòng
-wc -w essay.txt                      # số từ
-find /src -name "*.py" | xargs wc -l | tail -1  # tổng dòng code Python
+### xargs — Build và execute từ stdin
+```bash
+find . -name "*.txt" | xargs wc -l         # đếm dòng tất cả .txt
+find . -name "*.log" | xargs rm            # xóa tất cả .log
+find . -name "*.py" | xargs grep "TODO"    # tìm TODO trong .py files
+echo "file1 file2 file3" | xargs ls -la   # ls từng file
+cat urls.txt | xargs curl -O              # download từng URL
 
-# ===== xargs =====
-find . -name "*.log" | xargs rm -f              # xóa tất cả .log
-find . -name "*.py"  | xargs grep -l "TODO"     # file .py có TODO
-echo "file1.txt file2.txt" | xargs -n1 cat      # mỗi lần một file
-find . -name "*.jpg" | xargs -P4 -I{} convert {} {}.png  # parallel convert
+xargs -n 1 command < file.txt  # chạy command với từng dòng
+xargs -P 4 command < file.txt  # parallel với 4 processes
+xargs -I {} command {} arg2    # {} là placeholder cho mỗi item
+find . -name "*.log" | xargs -I {} mv {} /archive/
+```
+
+### diff — So sánh file
+```bash
+diff file1.txt file2.txt           # so sánh 2 file
+diff -u file1.txt file2.txt        # unified format (dễ đọc hơn)
+diff -r dir1/ dir2/                # so sánh 2 thư mục
+diff -i file1 file2                # case-insensitive
+diff -w file1 file2                # bỏ qua whitespace
+diff -y file1 file2                # side-by-side
+diff --color file1 file2           # với màu
+
+# patch — áp dụng diff
+diff -u old.txt new.txt > changes.patch
+patch old.txt < changes.patch
+```
+
+### Pipeline thực tế
+```bash
+# Top 10 IP access nhiều nhất từ nginx log
+awk '{print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head -10
+
+# Đếm error codes từ log
+grep " 5[0-9][0-9] " access.log | awk '{print $9}' | sort | uniq -c
+
+# Tìm process nặng nhất
+ps aux | sort -k3 -rn | head -10
+
+# Xóa dòng trống và comment trong config
+grep -v '^#' config.conf | grep -v '^$'
+
+# Replace trong nhiều file
+find . -name "*.conf" -exec sed -i 's/old/new/g' {} \;
+
+# Đếm số dòng code Python
+find . -name "*.py" | xargs wc -l | tail -1
+
+# Xem log 5 phút gần nhất
+awk -v d="$(date -d '5 minutes ago' '+%d/%b/%Y:%H:%M')" '$4 > "["d' access.log
 ```
 
 ---
 
-## Kết hợp lệnh nâng cao (Pipes & Patterns)
+## Khi nào dùng gì
 
-```bash
-# ===== Log analysis =====
-# Tìm 10 IP tấn công nhiều nhất
-grep "Failed password" /var/log/auth.log \
-  | awk '{print $(NF-3)}' \
-  | sort | uniq -c | sort -rn | head -10
-
-# Xem error rate theo giờ
-grep "ERROR" app.log \
-  | awk '{print $1, substr($2,1,2)}' \
-  | sort | uniq -c
-
-# Lọc response code 5xx từ nginx access log
-awk '$9 ~ /^5/' /var/log/nginx/access.log \
-  | awk '{print $9}' | sort | uniq -c | sort -rn
-
-# ===== Data processing =====
-# Extract emails từ file
-grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' contacts.txt | sort -u
-
-# Extract IP addresses
-grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' logfile | sort -u
-
-# CSV: tính tổng cột price (cột 3) khi status = "sold" (cột 2)
-awk -F, '$2 == "sold" {sum += $3} END {printf "Total: $%.2f\n", sum}' sales.csv
-
-# Chuyển CSV thành SQL INSERT
-awk -F, 'NR>1 {printf "INSERT INTO table VALUES (\"%s\", \"%s\", %s);\n", $1, $2, $3}' data.csv
-
-# ===== File processing =====
-# Thay đổi extension hàng loạt trong file
-sed -i 's/\.jpeg/.jpg/g' filelist.txt
-
-# Tạo danh sách file không trùng từ nhiều log
-cat *.log | grep "UPLOAD" | awk '{print $5}' | sort -u
-
-# Kiểm tra config file có syntax lạ
-grep -Pn "[^\x00-\x7F]" config.yaml   # tìm non-ASCII characters
-
-# Monitor log và alert
-tail -F /var/log/app.log | grep --line-buffered "CRITICAL" | while read line; do
-  echo "ALERT: $line" | mail -s "Critical Error" admin@example.com
-done
-```
+| Tình huống | Lệnh |
+|-----------|------|
+| Tìm text trong file | `grep "pattern" file` |
+| Tìm trong nhiều file | `grep -r "pattern" .` |
+| Thay thế text | `sed 's/old/new/g'` |
+| Xử lý cột/bảng | `awk` |
+| Sort output | `sort -n` hoặc `sort -rh` |
+| Đếm tần suất | `sort \| uniq -c \| sort -rn` |
+| Cắt cột | `cut -d: -f1` |
+| Đổi ký tự | `tr 'a-z' 'A-Z'` |
+| Chạy lệnh với nhiều args | `xargs` |
 
 ---
 
-## Lỗi thường gặp (Common Pitfalls)
+## Lỗi thường gặp
 
-**1. `grep` không tìm thấy vì regex đặc biệt chưa escape**
 ```bash
-grep "192.168.1.1" file        # . match bất kỳ ký tự!
-grep "192\.168\.1\.1" file     # ĐÚNG: escape dấu chấm
-grep -F "192.168.1.1" file     # -F: fixed string, không dùng regex
-```
+# uniq không loại bỏ được duplicate
+# → uniq chỉ loại bỏ consecutive duplicates, PHẢI sort trước
+sort file.txt | uniq            # đúng
 
-**2. `sed -i` không backup trên macOS vs Linux**
-```bash
-sed -i 's/foo/bar/g' file      # Linux: OK
-sed -i '' 's/foo/bar/g' file   # macOS: cần '' sau -i
-# Portable:
-sed -i.bak 's/foo/bar/g' file  # tạo .bak, hoạt động trên cả hai
-```
+# sed -i trên macOS khác Linux
+sed -i '' 's/old/new/g' file   # macOS cần '' sau -i
+sed -i 's/old/new/g' file      # Linux OK
 
-**3. `awk` print vs printf**
-```bash
-awk '{print $1, $2}' file      # tự thêm newline, dùng OFS cho separator
-awk '{printf "%s\t%s\n", $1, $2}' file  # control format hoàn toàn
-```
+# awk: NF vs NR
+NF = number of fields (cột)
+NR = number of records (dòng/row)
+$NF = giá trị cột cuối
+NR == 5 = dòng thứ 5
 
-**4. `sort | uniq` vs `sort -u`**
-```bash
-sort file | uniq    # đúng: uniq CHỈ xóa dòng LIÊN TIẾP trùng nhau
-sort -u file        # sort kết hợp unique — thường nhanh hơn
-uniq file           # SAI nếu không sort trước — chỉ xóa adjacent duplicates
-```
-
-**5. `tail -f` vs `tail -F`**
-```bash
-tail -f /var/log/app.log   # follow inode: dừng khi file bị rotate/xóa
-tail -F /var/log/app.log   # follow tên file: tự mở file mới khi rotate
-# Với log rotation, luôn dùng -F
-```
-
-**6. Dùng `cat | grep` thay vì `grep file`**
-```bash
-cat file.txt | grep "pattern"   # UUOC (Useless Use Of Cat)
-grep "pattern" file.txt         # ĐÚNG: trực tiếp và nhanh hơn
-```
-
-**7. `awk` NF và $NF**
-```bash
-awk '{print NF}' file      # số lượng fields trong dòng
-awk '{print $NF}' file     # field cuối cùng
-awk '{print $(NF-1)}' file # field áp cuối
+# grep: dùng -E cho extended regex
+grep "[0-9]+" file              # SALL: + không hoạt động trong BRE
+grep -E "[0-9]+" file           # ĐÚNG: dùng -E
+grep -P "\d+" file              # Perl regex
 ```
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-**Q1: Sự khác biệt giữa `grep`, `egrep`, `fgrep`?**
-> `grep` dùng BRE (Basic Regular Expressions) — `+`, `?`, `|` cần escape. `egrep` (= `grep -E`) dùng ERE — không cần escape. `fgrep` (= `grep -F`) tìm literal string, không interpret regex — nhanh nhất. Trong script hiện đại, dùng `grep -E` và `grep -F` thay vì `egrep`/`fgrep`.
-
-**Q2: Giải thích `awk 'BEGIN{} /pattern/{} END{}'`?**
-> `BEGIN{}` chạy một lần trước khi đọc bất kỳ input nào (init variables, print header). Pattern/action `{}`chạy với mỗi dòng match pattern. `END{}` chạy một lần sau khi đọc hết input (tính total, print summary). Nếu không có pattern, action chạy với mọi dòng.
-
-**Q3: Dùng sed để xóa comment và dòng trống từ config file?**
-```bash
-sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' config.txt
-# Hoặc gộp:
-sed '/^\s*[#;]/d; /^\s*$/d' config.txt
-```
-
-**Q4: `cut` vs `awk` cho cắt cột — khi nào dùng cái nào?**
-> `cut` đơn giản, nhanh cho delimiter fixed và cột cố định. `awk` mạnh hơn khi cần: nhiều điều kiện, tính toán, format output, xử lý whitespace variable (awk tự split trên whitespace), hoặc khi delimiter thay đổi. Với CSV có quoted fields, không nên dùng `cut`.
-
-**Q5: Làm sao tìm dòng xuất hiện trong file A nhưng không có trong file B?**
-```bash
-comm -23 <(sort file_a) <(sort file_b)
-# Hoặc:
-grep -Fxvf file_b file_a
-# -F: fixed string, -x: whole line, -v: invert, -f: patterns from file
-```
-
-**Q6: Giải thích `xargs -P` và khi nào dùng?**
-> `-P N` chạy tối đa N processes song song. Hữu ích khi mỗi lệnh tốn thời gian và independent (không shared state). Ví dụ: `find . -name "*.jpg" | xargs -P8 -I{} convert {} {}_thumb.jpg` — convert 8 ảnh cùng lúc. Tuy nhiên output có thể interleaved — cẩn thận khi cần ordered output.
+- `grep -v` làm gì? Cho ví dụ.
+- Giải thích `sort | uniq -c | sort -rn`.
+- `sed 's/old/new/g'` vs `sed 's/old/new/'` — khác nhau thế nào?
+- Làm thế nào để in cột 3 của file CSV bằng `awk`?
+- `xargs` dùng để làm gì? Khi nào cần?

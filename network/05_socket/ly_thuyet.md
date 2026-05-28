@@ -1,535 +1,357 @@
-# Socket — Giao tiếp mạng ở tầng thấp nhất
+# Socket — Giao tiếp mạng tầng thấp
 
 ---
 
 ## Giải thích cho người mới hoàn toàn
 
-Tưởng tượng bạn muốn nói chuyện điện thoại với bạn bè. Để gọi được, cần hai thứ:
-1. **Số điện thoại** (địa chỉ IP): biết gọi đến nhà nào
-2. **Số phòng** (Port): biết gặp ai trong nhà đó (ví dụ: gia đình có ông bà, bố mẹ, con cái — mỗi người dùng một "nhánh máy" khác nhau)
+Socket giống như **ổ cắm điện**. Ổ cắm có hai đầu — một đầu ở tường (server), một đầu ở phích cắm (client). Khi bạn cắm phích vào ổ, điện chạy qua — hai bên giao tiếp được với nhau.
 
-**Socket** là chiếc điện thoại hai đầu đó. Nó là "ổ cắm" kết nối hai chương trình lại với nhau qua mạng — một đầu ở máy A, một đầu ở máy B.
+Trong mạng máy tính: **socket** là điểm cuối (endpoint) của một kết nối. Một socket được xác định bởi:
+- **Địa chỉ IP** — tương đương địa chỉ nhà
+- **Port** — tương đương số phòng trong tòa nhà
+- **Protocol** — TCP hoặc UDP
 
-Khi bạn dùng ứng dụng chat, xem video YouTube, hay gửi email — tất cả đều chạy qua socket bên dưới. Lập trình viên dùng socket để viết phần "đường dây điện thoại" đó.
-
-**WebSocket** khác với socket thông thường: WebSocket giống như điện thoại có loa ngoài — cả hai bên có thể nói chuyện cùng lúc mà không cần ai "gọi trước" mỗi lần.
+Khi một ứng dụng web server "mở socket" ở port 80, nó giống như người ngồi ở bàn tiếp tân và chờ khách đến gõ cửa.
 
 ---
 
 ## Giải thích cho người đã biết lập trình (nâng cao)
 
-### Socket là gì về mặt kỹ thuật?
+### Socket Types
 
-Socket là **abstraction của OS** đại diện cho một endpoint giao tiếp mạng. Về cơ bản là một file descriptor (Linux: `int fd`) kết hợp với:
-- **Protocol family**: AF_INET (IPv4), AF_INET6 (IPv6), AF_UNIX (local)
-- **Socket type**: SOCK_STREAM (TCP), SOCK_DGRAM (UDP), SOCK_RAW
-- **Địa chỉ**: IP + Port number (5-tuple: protocol, src_ip, src_port, dst_ip, dst_port)
+| Type | Protocol | Đặc điểm | Dùng khi |
+|------|----------|----------|----------|
+| `SOCK_STREAM` | TCP | Connection-oriented, reliable, ordered, stream | HTTP, SSH, database |
+| `SOCK_DGRAM` | UDP | Connectionless, unreliable, datagram | DNS, VoIP, gaming |
+| `SOCK_RAW` | IP trực tiếp | Bypass TCP/UDP layer, cần root | Network tools (ping, nmap) |
+| `AF_UNIX` | Unix Domain Socket | IPC trong cùng machine, không qua network stack | Nginx ↔ PHP-FPM, Docker |
 
-Socket API (Berkeley Sockets) được định chuẩn bởi POSIX, available trên tất cả Unix-like OS và Windows (WinSock).
-
-### TCP Socket Lifecycle
-
-```
-SERVER SIDE                          CLIENT SIDE
-                                     
-socket()                             socket()
-   |                                    |
-bind()                                  |
-   |                                    |
-listen()                                |
-   |                                    |
-accept() ← BLOCKING ←─────────── connect() ← 3-way handshake
-   |                                    |
-recv() / send()                     send() / recv()
-   |                                    |
-close()                              close()
-
-Kernel queues (trong listen()):
-┌─────────────────────────────────────┐
-│ SYN Queue (incomplete connections)  │ ← SYN received, waiting SYN-ACK ACK
-│   [backlog/2 entries typically]     │
-└─────────────────────────────────────┘
-┌─────────────────────────────────────┐
-│ Accept Queue (completed connections)│ ← 3-way handshake done, waiting accept()
-│   [backlog entries]                 │
-└─────────────────────────────────────┘
-```
-
-**Quan trọng**: `listen(backlog)` — `backlog` là kích thước của accept queue, không phải số client tổng cộng. Nếu accept queue đầy, client mới nhận SYN timeout hoặc RST.
-
-### UDP Socket Lifecycle
+### Socket Lifecycle (TCP)
 
 ```
-SERVER                               CLIENT
-                                     
-socket()                             socket()
-   |                                    |
-bind()                             (bind tùy chọn)
-   |                                    |
-recvfrom() ← BLOCKING               sendto(server_addr, data)
-   |                                    |
-sendto(client_addr, response)       recvfrom() ← data hoặc timeout
+Server                              Client
+  |                                   |
+socket()                          socket()
+  |                                   |
+bind(host, port)                      |
+  |                                   |
+listen(backlog)                       |
+  |                                   |
+accept() ←--- SYN ------  connect() --+
+  |          SYN-ACK --→              |
+  |          ACK  ←---                |
+  |                                   |
+recv() / send()  ←→  send() / recv()  |
+  |                                   |
+close()  ←--- FIN -----  close() ----+
 ```
 
-UDP không có "connection" — `sendto()` và `recvfrom()` mang cả địa chỉ. Không có trạng thái kết nối.
+**backlog**: số connection đang chờ trong queue (chưa được `accept()`). Nếu queue đầy → client nhận RST hoặc timeout.
 
 ### Blocking vs Non-blocking Socket
 
-**Blocking (default)**:
-```
-recv() ──► kernel ──► dữ liệu chưa có ──► thread bị suspend ──► dữ liệu đến ──► thread được resume
-```
-- Thread bị block hoàn toàn, không làm được gì khác
-- Đơn giản để lập trình, nhưng cần 1 thread/connection
-
-**Non-blocking**:
+**Blocking (mặc định):**
 ```python
-import socket
-sock = socket.socket()
-sock.setblocking(False)
+data = sock.recv(1024)  # thread bị block ở đây cho đến khi có data
+```
+- Đơn giản, dễ code
+- Mỗi connection cần 1 thread → không scale với nhiều connection đồng thời
 
+**Non-blocking:**
+```python
+sock.setblocking(False)
 try:
     data = sock.recv(1024)
 except BlockingIOError:
-    # Không có data ngay lúc này, xử lý việc khác
-    pass
+    pass  # không có data, thử lại sau
 ```
-- `recv()` trả về `EAGAIN`/`EWOULDBLOCK` ngay nếu không có data
-- Phải poll liên tục → CPU lãng phí nếu không kết hợp với I/O multiplexing
+- Không block thread
+- Phải polling liên tục → CPU waste
+- Giải pháp: dùng I/O multiplexing
 
-### I/O Multiplexing — select/poll/epoll
+### I/O Multiplexing — Xử lý nhiều socket với 1 thread
 
-**Vấn đề**: Xử lý 10,000 connection với 1 thread?
+| API | OS | Mô tả | Độ phức tạp |
+|-----|----|-------|------------|
+| `select()` | POSIX | Monitor ≤ 1024 fds, copy fd_set kernel/userspace mỗi lần | O(n) |
+| `poll()` | POSIX | Không giới hạn fd, vẫn O(n) scan | O(n) |
+| `epoll()` | Linux | Event-driven, chỉ trả về fd có event, O(1) per event | O(1) |
+| `kqueue()` | BSD/macOS | Tương đương epoll trên macOS | O(1) |
+| `IOCP` | Windows | I/O Completion Ports, async | O(1) |
 
-**select** (POSIX, tất cả OS):
+**epoll flow:**
 ```python
-import select
-
-readable, _, _ = select.select([sock1, sock2, sock3], [], [], timeout=1.0)
-for s in readable:
-    data = s.recv(1024)
-```
-- Giới hạn FD_SETSIZE (thường 1024) file descriptors
-- O(n) mỗi call: scan toàn bộ fd_set
-- Phải copy fd_set từ userspace vào kernel mỗi lần
-
-**poll** (POSIX):
-```python
-import select
-poll_obj = select.poll()
-poll_obj.register(sock.fileno(), select.POLLIN)
-
-events = poll_obj.poll(1000)  # timeout ms
-for fd, event in events:
-    if event & select.POLLIN:
-        # Data available
-```
-- Không giới hạn FD số lượng
-- Vẫn O(n) scan
-
-**epoll** (Linux only, BEST):
-```python
-import select
-
 epoll = select.epoll()
 epoll.register(server_sock.fileno(), select.EPOLLIN)
-conn_map = {}
-
-while True:
-    events = epoll.poll(timeout=1)  # O(1) - chỉ return ready FDs
-    for fd, event in events:
-        if fd == server_sock.fileno():
-            conn, addr = server_sock.accept()
-            conn.setblocking(False)
-            epoll.register(conn.fileno(), select.EPOLLIN)
-            conn_map[conn.fileno()] = conn
-        elif event & select.EPOLLIN:
-            data = conn_map[fd].recv(1024)
-            if data:
-                conn_map[fd].sendall(data)
-            else:
-                epoll.unregister(fd)
-                conn_map[fd].close()
-                del conn_map[fd]
-```
-- O(1): kernel thông báo FD nào ready, không scan toàn bộ
-- Edge-triggered (EPOLLET) vs Level-triggered mode
-- Nền tảng của nginx, Node.js, asyncio
-
-### Socket Options
-
-```python
-import socket
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-# SO_REUSEADDR: cho phép bind lại port ngay sau khi đóng (bỏ qua TIME_WAIT)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-# SO_REUSEPORT: nhiều socket bind cùng port (load balancing giữa processes)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-
-# SO_KEEPALIVE: gửi keepalive probe khi connection idle
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-# Trên Linux, cấu hình keepalive timing:
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)   # Idle 60s trước khi probe
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)  # Probe mỗi 10s
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6)     # Tối đa 6 probe
-
-# TCP_NODELAY: tắt Nagle's algorithm (gửi ngay, không buffer)
-sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-# SO_SNDBUF / SO_RCVBUF: kích thước buffer
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-
-# Timeout
-sock.settimeout(30.0)  # seconds (None = blocking, 0 = non-blocking)
+# ... thêm client fds khi connect ...
+events = epoll.poll(timeout=1)  # chỉ trả về fd có event, không scan toàn bộ
+for fd, event in events:
+    if event & select.EPOLLIN:
+        # đọc data từ fd
 ```
 
-### WebSocket vs HTTP Socket
+### C10K Problem
 
-| Tiêu chí | HTTP (TCP Socket) | WebSocket |
-|----------|-------------------|-----------|
-| Protocol | HTTP request/response | WebSocket protocol (RFC 6455) |
-| Direction | Half-duplex (request-response) | Full-duplex (bidirectional) |
-| Handshake | HTTP request | HTTP Upgrade handshake |
-| Connection | Short-lived (HTTP/1.1 keepalive) | Long-lived, persistent |
-| Overhead | Header mỗi request | Header nhỏ sau handshake |
-| Use case | REST API, file download | Real-time chat, game, dashboard |
-| Port | 80/443 | 80/443 (ws:// / wss://) |
+Bài toán: làm thế nào handle **10,000 concurrent connections** với 1 server?
 
-WebSocket Handshake:
-```http
-# Client gửi HTTP Upgrade request:
-GET /chat HTTP/1.1
-Host: example.com
+| Approach | Vấn đề | Giải pháp |
+|----------|--------|-----------|
+| Thread-per-connection | 10K threads = 10GB RAM (1MB stack/thread), context switch overhead | Thread pool |
+| Thread pool | Pool size cố định, blocking I/O trong thread làm thread bị lock | Async I/O |
+| Async + epoll | 1 thread xử lý nhiều connection, không block | Nginx, Node.js, asyncio |
+| Async + coroutine | Code giống sync, chạy async | Python asyncio, Go goroutine |
+
+### WebSocket vs HTTP
+
+WebSocket: **bidirectional, persistent** connection. Bắt đầu từ HTTP upgrade:
+
+```
+Client → Server:
+GET /ws HTTP/1.1
 Upgrade: websocket
 Connection: Upgrade
 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
 Sec-WebSocket-Version: 13
 
-# Server response:
+Server → Client:
 HTTP/1.1 101 Switching Protocols
 Upgrade: websocket
 Connection: Upgrade
 Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
-# Sau đây là WebSocket frames, không còn HTTP
 ```
+
+Sau đó, cả hai chiều tự do gửi frames mà không cần request.
+
+### Unix Domain Socket vs Network Socket
+
+| | Unix Domain Socket | Network Socket |
+|-|-------------------|---------------|
+| Transport | File system path | IP + Port |
+| Overhead | Không có network stack | Có network stack |
+| Speed | ~2x nhanh hơn | Chậm hơn |
+| Scope | Cùng machine | Bất kỳ đâu |
+| Ví dụ | `/var/run/nginx.sock`, `/tmp/mysql.sock` | `127.0.0.1:3306` |
 
 ---
 
 ## Định nghĩa chính xác
 
-**Socket**: Một endpoint truyền thông trong mạng máy tính, được xác định bởi một địa chỉ IP và một port number. Cung cấp interface lập trình (API) để các tiến trình trên các máy khác nhau có thể giao tiếp qua mạng theo mô hình Berkeley Sockets (POSIX).
-
-**Port number**: Số 16-bit (0–65535) xác định tiến trình ứng dụng trên một host. Well-known ports: 0–1023, Registered ports: 1024–49151, Dynamic/ephemeral ports: 49152–65535.
-
-**File descriptor**: Số nguyên đại diện cho một tài nguyên đang mở trong kernel (file, socket, pipe...). Trên Linux, socket là file descriptor.
+**Socket** là abstraction của OS đại diện cho một endpoint của communication channel. Được tạo bởi `socket()` syscall, trả về **file descriptor**. Socket API (Berkeley Sockets, POSIX) là interface chuẩn để network programming. Socket được xác định bởi 5-tuple: `(src_ip, src_port, dst_ip, dst_port, protocol)`.
 
 ---
 
-## Bảng / Sơ đồ kỹ thuật
+## Đặc điểm kỹ thuật / So sánh
 
-### So sánh I/O Models
-
-| Model | Blocking? | CPU Usage | Scalability | Complexity |
-|-------|-----------|-----------|-------------|-----------|
-| Blocking I/O | Có | Thấp | Kém (1 thread/conn) | Thấp |
-| Non-blocking (polling) | Không | Cao | Trung bình | Trung bình |
-| select/poll | Không | Trung bình | Trung bình (O(n)) | Trung bình |
-| epoll (Linux) | Không | Thấp | Cao (O(1)) | Cao |
-| Async I/O (io_uring) | Không | Rất thấp | Rất cao | Rất cao |
-
-### Socket Address Families
-
-```
-AF_INET  + SOCK_STREAM  → TCP over IPv4
-AF_INET  + SOCK_DGRAM   → UDP over IPv4
-AF_INET6 + SOCK_STREAM  → TCP over IPv6
-AF_INET6 + SOCK_DGRAM   → UDP over IPv6
-AF_UNIX  + SOCK_STREAM  → Unix Domain Socket (local IPC)
-AF_UNIX  + SOCK_DGRAM   → Unix Domain Socket UDP-like
-```
-
-Unix Domain Socket nhanh hơn TCP localhost vì không đi qua network stack.
+| Đặc điểm | TCP Socket | UDP Socket | Unix Socket |
+|-----------|-----------|-----------|-------------|
+| Connection | Có | Không | Có (SOCK_STREAM) |
+| Reliable | Có | Không | Có |
+| Address | IP + Port | IP + Port | File path |
+| Network | Có | Có | Không (local only) |
+| Overhead | Medium | Low | Lowest |
+| Use case | Client-server | Real-time | IPC trên cùng host |
 
 ---
 
 ## Code mẫu
 
-### TCP Server + Client đầy đủ (Python)
-
 ```python
-# ============================================================
-# tcp_server.py — Echo server với epoll (Linux) hoặc select
-# ============================================================
 import socket
 import select
-import sys
+import threading
+import ssl
 
-def run_tcp_server(host: str = '0.0.0.0', port: int = 9999):
+# ══════════════════════════════════════════════════
+# 1. TCP Echo Server (blocking, multi-thread)
+# ══════════════════════════════════════════════════
+def handle_client(conn, addr):
+    print(f"[+] Connected: {addr}")
+    try:
+        while True:
+            data = conn.recv(4096)
+            if not data:
+                break
+            conn.sendall(data)  # echo
+    finally:
+        conn.close()
+        print(f"[-] Disconnected: {addr}")
+
+def tcp_server_threaded(host='127.0.0.1', port=9000):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((host, port))
+        srv.listen(10)
+        print(f"[TCP Server] {host}:{port}")
+        while True:
+            conn, addr = srv.accept()
+            t = threading.Thread(target=handle_client, args=(conn, addr))
+            t.daemon = True
+            t.start()
+
+# ══════════════════════════════════════════════════
+# 2. Non-blocking với select() — I/O Multiplexing
+# ══════════════════════════════════════════════════
+def tcp_server_select(host='127.0.0.1', port=9001):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
-    server.listen(128)  # backlog = 128
+    server.listen(10)
     server.setblocking(False)
-    
-    print(f"[*] Server listening on {host}:{port}")
-    
-    # I/O multiplexing với select (cross-platform)
-    inputs = [server]
-    
-    while True:
-        readable, _, exceptional = select.select(inputs, [], inputs, 1.0)
-        
+
+    inputs = [server]   # đang monitor read
+    outputs = []        # đang monitor write
+    message_queues = {}
+
+    print(f"[Select Server] {host}:{port}")
+    while inputs:
+        readable, writable, exceptional = select.select(inputs, outputs, inputs, timeout=1)
+
         for s in readable:
             if s is server:
-                # Kết nối mới
                 conn, addr = server.accept()
                 conn.setblocking(False)
                 inputs.append(conn)
-                print(f"[+] New connection from {addr[0]}:{addr[1]}")
+                print(f"[+] {addr}")
             else:
-                # Dữ liệu từ client đã kết nối
-                try:
-                    data = s.recv(4096)
-                    if data:
-                        print(f"[<] Received {len(data)} bytes: {data[:50]!r}")
-                        # Echo back
-                        s.sendall(data)
-                    else:
-                        # EOF: client đóng kết nối
-                        print(f"[-] Client disconnected")
-                        inputs.remove(s)
-                        s.close()
-                except ConnectionResetError:
+                data = s.recv(1024)
+                if data:
+                    if s not in message_queues:
+                        message_queues[s] = []
+                    message_queues[s].append(data)
+                    if s not in outputs:
+                        outputs.append(s)
+                else:
+                    # Connection closed
+                    if s in outputs:
+                        outputs.remove(s)
                     inputs.remove(s)
                     s.close()
-        
-        for s in exceptional:
-            inputs.remove(s)
-            s.close()
 
+        for s in writable:
+            if s in message_queues and message_queues[s]:
+                data = message_queues[s].pop(0)
+                s.sendall(data)
+            else:
+                outputs.remove(s)
 
-# ============================================================
-# tcp_client.py — Client với timeout và proper error handling
-# ============================================================
-import socket
-import struct
-
-def message_with_length_prefix(data: bytes) -> bytes:
-    """Thêm 4-byte length prefix để giải quyết TCP byte stream problem"""
-    return struct.pack('>I', len(data)) + data
-
-def recv_exactly(sock: socket.socket, n: int) -> bytes:
-    """Nhận đúng n bytes từ socket"""
-    data = bytearray()
-    while len(data) < n:
-        packet = sock.recv(n - len(data))
-        if not packet:
-            raise ConnectionError("Connection closed prematurely")
-        data.extend(packet)
-    return bytes(data)
-
-def recv_message(sock: socket.socket) -> bytes:
-    """Nhận một message hoàn chỉnh với length prefix"""
-    raw_len = recv_exactly(sock, 4)
-    msg_len = struct.unpack('>I', raw_len)[0]
-    return recv_exactly(sock, msg_len)
-
-def run_tcp_client(host: str = '127.0.0.1', port: int = 9999):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(10)  # Connection timeout
-        
-        try:
-            sock.connect((host, port))
-            print(f"[+] Connected to {host}:{port}")
-            
-            # Lấy địa chỉ local của socket này
-            local_addr = sock.getsockname()
-            print(f"[*] Local address: {local_addr[0]}:{local_addr[1]}")
-            
-            # Gửi messages
-            for i in range(3):
-                message = f"Hello #{i} from client"
-                sock.sendall(message.encode())
-                
-                response = sock.recv(4096)
-                print(f"[>] Sent: {message}")
-                print(f"[<] Recv: {response.decode()}")
-        
-        except socket.timeout:
-            print("[-] Connection timed out")
-        except ConnectionRefusedError:
-            print(f"[-] Cannot connect to {host}:{port}")
-
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'client':
-        run_tcp_client()
-    else:
-        run_tcp_server()
-```
-
-### UDP Server + Client
-
-```python
-# udp_demo.py
-import socket
-import threading
-
-def udp_server(host: str = '0.0.0.0', port: int = 9998):
-    """UDP server: không cần listen/accept"""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.bind((host, port))
-        print(f"[UDP] Server listening on {host}:{port}")
-        
+# ══════════════════════════════════════════════════
+# 3. UDP Server + Client
+# ══════════════════════════════════════════════════
+def udp_server(host='127.0.0.1', port=9002):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as srv:
+        srv.bind((host, port))
+        print(f"[UDP Server] {host}:{port}")
         while True:
-            # recvfrom trả về (data, (client_ip, client_port))
-            data, client_addr = sock.recvfrom(65535)  # Max UDP payload
-            print(f"[UDP] From {client_addr}: {data.decode()}")
-            
-            # Gửi reply trực tiếp về client
-            reply = f"UDP echo: {data.decode()}"
-            sock.sendto(reply.encode(), client_addr)
+            data, addr = srv.recvfrom(1024)
+            print(f"Received from {addr}: {data.decode()}")
+            srv.sendto(data, addr)
 
-def udp_client(host: str = '127.0.0.1', port: int = 9998):
+def udp_client(host='127.0.0.1', port=9002):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.settimeout(3.0)
-        
-        for i in range(3):
-            message = f"UDP message {i}"
-            # Không cần connect(), sendto trực tiếp
-            sock.sendto(message.encode(), (host, port))
-            
-            try:
-                data, server_addr = sock.recvfrom(65535)
-                print(f"[UDP] Reply from {server_addr}: {data.decode()}")
-            except socket.timeout:
-                print(f"[UDP] Timeout waiting for reply #{i}")
+        sock.sendto(b"Hello UDP!", (host, port))
+        data, _ = sock.recvfrom(1024)
+        print(f"Echo: {data.decode()}")
 
-# Server trong background thread
-t = threading.Thread(target=udp_server, daemon=True)
-t.start()
+# ══════════════════════════════════════════════════
+# 4. SSL/TLS Client
+# ══════════════════════════════════════════════════
+def tls_client(host='google.com', port=443):
+    ctx = ssl.create_default_context()
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw_sock:
+        raw_sock.connect((host, port))
+        with ctx.wrap_socket(raw_sock, server_hostname=host) as tls_sock:
+            print(f"TLS version: {tls_sock.version()}")
+            print(f"Cipher: {tls_sock.cipher()}")
+            # Gửi HTTP GET thủ công qua TLS
+            tls_sock.sendall(
+                f"GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode()
+            )
+            response = b""
+            while True:
+                chunk = tls_sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            print(response[:200].decode(errors='replace'))
 
-import time
-time.sleep(0.1)
-udp_client()
-```
-
-### Unix Domain Socket (IPC local)
-
-```python
-# unix_socket_demo.py
-import socket
+# ══════════════════════════════════════════════════
+# 5. Unix Domain Socket (IPC)
+# ══════════════════════════════════════════════════
 import os
-import threading
 
-SOCKET_PATH = '/tmp/my_app.sock'
+SOCKET_PATH = "/tmp/test.sock"
 
 def unix_server():
-    # Xóa socket file cũ nếu còn
     if os.path.exists(SOCKET_PATH):
         os.unlink(SOCKET_PATH)
-    
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.bind(SOCKET_PATH)
-        sock.listen(5)
-        print(f"[Unix] Listening on {SOCKET_PATH}")
-        
-        conn, _ = sock.accept()
-        with conn:
-            data = conn.recv(1024)
-            print(f"[Unix] Received: {data.decode()}")
-            conn.sendall(b"Pong!")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as srv:
+        srv.bind(SOCKET_PATH)
+        srv.listen(1)
+        conn, _ = srv.accept()
+        data = conn.recv(1024)
+        print(f"[Unix Server] Received: {data.decode()}")
+        conn.sendall(b"ACK")
+        conn.close()
 
 def unix_client():
-    import time; time.sleep(0.1)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.connect(SOCKET_PATH)
-        sock.sendall(b"Ping!")
-        reply = sock.recv(1024)
-        print(f"[Unix] Reply: {reply.decode()}")
-
-threading.Thread(target=unix_server, daemon=True).start()
-unix_client()
+        sock.sendall(b"Hello via Unix socket!")
+        response = sock.recv(1024)
+        print(f"[Unix Client] Response: {response.decode()}")
 ```
 
 ---
 
 ## Khi nào dùng / Khi nào KHÔNG dùng
 
-**Dùng TCP socket khi:**
-- Cần reliable, ordered delivery (hầu hết ứng dụng)
-- File transfer, database connection, web server
-- Khi dữ liệu không thể mất
+**TCP Socket — dùng khi:**
+- Cần reliable data transfer: web server, database, file transfer
+- Implement giao thức custom cần ordering và reliability
 
-**Dùng UDP socket khi:**
-- Cần low latency hơn reliability (VoIP, game, DNS)
-- Streaming (mất frame tốt hơn delay)
-- Broadcast/Multicast trong LAN
-- Tự xây reliable protocol (QUIC)
+**UDP Socket — dùng khi:**
+- Latency quan trọng hơn reliability: game, VoIP, video stream
+- Implement protocol trên UDP: DNS, QUIC, DTLS
 
-**Dùng Unix Domain Socket khi:**
-- IPC giữa processes trên cùng máy (nginx ↔ PHP-FPM, app ↔ database)
-- Nhanh hơn TCP localhost (không qua network stack)
-- Không cần port number
+**Unix Domain Socket — dùng khi:**
+- IPC (Inter-Process Communication) trên cùng machine
+- Performance-critical: Nginx ↔ app server, Redis trong container
 
-**Dùng epoll thay select khi:**
-- Linux và cần xử lý >1000 connections concurrent
-- High-performance server (dùng asyncio/uvloop đã có epoll sẵn)
+**Non-blocking + select/epoll — dùng khi:**
+- Cần handle nhiều connection đồng thời mà không tạo nhiều thread
+- Implement async server, event loop
 
-**Dùng abstraction cao hơn khi:**
-- asyncio (Python), Netty (Java), libuv (Node.js): đã tích hợp epoll/kqueue/IOCP
-- HTTP framework: không cần raw socket
+---
+
+## So sánh với các abstraction cấp cao
+
+| | Raw Socket | HTTP Library | WebSocket Library | asyncio |
+|-|-----------|-------------|-------------------|---------|
+| Tầng | L4 (Transport) | L7 (Application) | L7 trên HTTP | Event loop |
+| Độ phức tạp | Cao | Thấp | Thấp | Medium |
+| Flexibility | Tối đa | Hạn chế | Hạn chế | Tốt |
+| Use case | Custom protocol | REST API | Real-time | Async apps |
 
 ---
 
 ## Lỗi thường gặp (Common Pitfalls)
 
-1. **Partial send/recv**: `send()` có thể gửi ít hơn yêu cầu. `recv()` có thể trả về ít hơn `bufsize`. Luôn dùng `sendall()` và loop để nhận đủ.
-
-2. **Message boundary với TCP**: TCP là byte stream không có message delimiter. Phải tự định nghĩa protocol: length-prefix, newline, HTTP-style header+body.
-
-3. **Quên close socket**: Gây resource leak (file descriptor). Dùng `with socket.socket() as s:` hoặc try/finally.
-
-4. **Không set SO_REUSEADDR**: Restart server gặp "Address already in use" do TIME_WAIT. Luôn set trước `bind()`.
-
-5. **backlog quá nhỏ**: `listen(1)` với server nhiều client → SYN drop. Dùng 128 hoặc `socket.SOMAXCONN`.
-
-6. **Không handle EINTR**: System call bị interrupt bởi signal. Trong Python 3, `socket` tự retry, nhưng trong C phải check `errno == EINTR`.
-
-7. **Thread per connection không scalable**: 10,000 connections = 10,000 threads = RAM thấp, context switch nhiều. Dùng event-driven (epoll) hoặc asyncio.
-
-8. **Nagle's Algorithm gây latency**: Nhỏ nhiều writes → delay trước khi gửi. Set `TCP_NODELAY = 1` cho interactive ứng dụng.
-
-9. **UDP buffer overflow bị mất gói**: OS buffer đầy → gói bị drop silently. Tăng `SO_RCVBUF` và xử lý nhanh.
+- **Không `SO_REUSEADDR`**: sau khi server crash, port vẫn ở TIME_WAIT, không bind được ngay — phải chờ ~60s.
+- **Không đọc hết data**: `recv(1024)` không đảm bảo nhận đủ 1024 bytes — loop cho đến khi nhận đủ.
+- **Không đóng socket**: resource leak, file descriptor exhaustion.
+- **Không handle partial send**: `send()` có thể không gửi hết data — dùng `sendall()`.
+- **Blocking socket trong event loop**: một blocking call block toàn bộ event loop — dùng non-blocking hoặc thread pool.
+- **Không set timeout**: server chết, client hang mãi — set `sock.settimeout(seconds)`.
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-1. **Socket là gì? Khác gì với port?**
-   - Socket = IP + Port = endpoint hoàn chỉnh. Port là số xác định service trên host. Socket là abstraction OS để giao tiếp, bao gồm cả state (connected/listening) và buffers.
-
-2. **Tại sao cần SO_REUSEADDR?**
-   - TCP TIME_WAIT giữ socket 2*MSL sau khi đóng. Mà không có REUSEADDR, `bind()` trên port đó sẽ fail. SO_REUSEADDR cho phép bind ngay cả khi có TIME_WAIT socket.
-
-3. **Làm sao xử lý 10,000 concurrent connections?**
-   - Không dùng 1 thread/connection. Dùng I/O multiplexing: epoll (Linux) / kqueue (BSD) / IOCP (Windows). Hoặc async framework như asyncio, Netty, Node.js đã làm sẵn.
-
-4. **TCP byte stream là gì và làm sao giải quyết?**
-   - TCP không giữ message boundaries. Phải tự protocol: (a) length-prefix header, (b) delimiter như `\r\n`, (c) fixed-size messages.
-
-5. **Khác nhau giữa select, poll, epoll?**
-   - select: giới hạn 1024 fd, O(n), copy fd_set vào kernel mỗi lần. poll: không giới hạn fd, O(n). epoll: O(1), kernel callback khi fd ready, không copy, chỉ Linux.
-
-6. **Nagle's Algorithm là gì?**
-   - Buffer nhiều write nhỏ thành 1 segment lớn để tăng efficiency. Nhưng gây latency cho interactive app. Tắt bằng TCP_NODELAY.
-
-7. **Khác nhau giữa TCP socket và WebSocket?**
-   - TCP socket: transport layer, raw bytes. WebSocket: application layer protocol chạy trên HTTP, sau đó upgrade sang full-duplex, có framing. WebSocket dành cho web browser, TCP socket cho general purpose.
-
-8. **Unix Domain Socket vs TCP localhost?**
-   - UDS nhanh hơn: không qua TCP/IP stack, không checksum, không congestion control. Chỉ dùng được khi cùng máy. Nginx ↔ app thường dùng UDS.
+- Giải thích TCP socket lifecycle: socket → bind → listen → accept → recv/send → close.
+- Blocking vs non-blocking socket — sự khác biệt?
+- select() vs epoll() — tại sao epoll hiệu quả hơn?
+- C10K problem là gì? Giải pháp là gì?
+- WebSocket upgrade từ HTTP diễn ra như thế nào?
+- Unix Domain Socket khác Network Socket ở điểm nào?
+- Tại sao dùng `SO_REUSEADDR`?
+- `send()` vs `sendall()` — tại sao cần `sendall()`?

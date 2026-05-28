@@ -1,499 +1,309 @@
-# HTTP/HTTPS — Giao thức nền tảng của World Wide Web
+# HTTP & HTTPS
 
 ---
 
 ## Giải thích cho người mới hoàn toàn
 
-Hãy tưởng tượng bạn vào một tiệm ăn. Bạn (client) gọi món cho bồi bàn (server): "Cho tôi một tô phở đặc biệt" (request). Bồi bàn đi vào bếp, một lúc sau mang ra tô phở cho bạn (response).
+Hãy tưởng tượng bạn đang gọi món tại nhà hàng. Bạn (trình duyệt) gọi phục vụ (server) và nói: *"Cho tôi một tô phở"* (request). Phục vụ mang tô phở ra (response). Nếu nhà hàng hết phở, phục vụ nói *"Xin lỗi, hết món rồi"* (status code 404).
 
-**HTTP** hoạt động đúng theo quy trình đó:
-1. Trình duyệt của bạn gửi yêu cầu (request) đến máy chủ web
-2. Máy chủ xử lý và gửi trả nội dung (response) — trang HTML, ảnh, video...
-3. Trình duyệt hiển thị nội dung đó lên màn hình
+**HTTP** là ngôn ngữ giao tiếp đó — quy định cách trình duyệt "hỏi" và server "trả lời".
 
-**HTTPS** giống như tiệm ăn đó có phòng riêng kín đáo và bồi bàn ký hợp đồng bảo mật: mọi cuộc trò chuyện được mã hóa, không ai nghe lén được. Chữ "S" viết tắt cho "Secure".
-
-Điểm quan trọng: HTTP là **stateless** — bồi bàn không nhớ bạn là ai từ lần trước. Mỗi lần bạn vào tiệm, bạn phải tự giới thiệu lại (đó là lý do cần cookie/session để "nhớ" bạn đã đăng nhập).
+Còn **HTTPS** giống như cuộc nói chuyện đó diễn ra trong phòng riêng, cách âm hoàn toàn, không ai nghe lén được. Chữ **S** là **Secure** — mọi thứ được mã hóa trước khi truyền đi. Ngay cả khi có kẻ xấu ngồi giữa đường mạng, họ cũng chỉ thấy ký tự vô nghĩa.
 
 ---
 
 ## Giải thích cho người đã biết lập trình (nâng cao)
 
-### HTTP là Application Layer Protocol
+### HTTP — Hypertext Transfer Protocol
 
-HTTP (HyperText Transfer Protocol) chạy trên TCP (port 80) hoặc TLS+TCP (HTTPS, port 443). Là giao thức **request-response**, **stateless**, **text-based** (HTTP/1.x).
+HTTP là application-layer protocol (L7) chạy trên TCP (HTTP/1.1, HTTP/2) hoặc QUIC (HTTP/3). Mỗi transaction gồm request và response.
 
-### HTTP Request Structure
-
+**Request structure:**
 ```
-POST /api/users HTTP/1.1
-Host: example.com
-Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
-Accept: application/json
-Content-Length: 45
-
-{"name": "Alice", "email": "alice@example.com"}
+GET /api/users?page=1 HTTP/1.1\r\n
+Host: api.example.com\r\n
+Authorization: Bearer eyJhbGc...\r\n
+Accept: application/json\r\n
+\r\n
 ```
 
-Cấu trúc:
-- **Request Line**: `METHOD /path HTTP/version`
-- **Headers**: Key-Value, mỗi dòng một header
-- **Blank line**: phân cách header và body
-- **Body** (tùy chọn): dữ liệu gửi kèm
-
-### HTTP Response Structure
-
+**Response structure:**
 ```
-HTTP/1.1 201 Created
-Content-Type: application/json
-Location: /api/users/123
-X-Request-ID: abc-def-456
-Date: Wed, 28 May 2026 10:00:00 GMT
-
-{"id": 123, "name": "Alice", "created_at": "2026-05-28"}
+HTTP/1.1 200 OK\r\n
+Content-Type: application/json\r\n
+Content-Length: 256\r\n
+Cache-Control: max-age=3600\r\n
+\r\n
+{"users": [...]}
 ```
 
-Cấu trúc:
-- **Status Line**: `HTTP/version STATUS_CODE reason`
-- **Headers**
-- **Blank line**
-- **Body**
+### HTTP Methods — Semantics
 
-### HTTP Methods — Idempotent và Safe
+| Method | Safe? | Idempotent? | Has Body? | Mục đích |
+|--------|-------|-------------|-----------|----------|
+| GET    | Có    | Có          | Không     | Lấy tài nguyên |
+| HEAD   | Có    | Có          | Không     | Chỉ lấy headers (kiểm tra tồn tại, size) |
+| OPTIONS| Có    | Có          | Không     | CORS preflight, xem method được phép |
+| POST   | Không | Không       | Có        | Tạo tài nguyên mới |
+| PUT    | Không | Có          | Có        | Replace **toàn bộ** tài nguyên |
+| PATCH  | Không | Không       | Có        | Cập nhật **một phần** tài nguyên |
+| DELETE | Không | Có          | Không     | Xóa tài nguyên |
 
-| Method  | Safe | Idempotent | Body? | Mô tả |
-|---------|------|------------|-------|-------|
-| GET     | Có   | Có         | Không | Lấy resource |
-| HEAD    | Có   | Có         | Không | Như GET nhưng không có body |
-| OPTIONS | Có   | Có         | Không | Hỏi server hỗ trợ những gì |
-| POST    | Không| Không      | Có    | Tạo resource mới |
-| PUT     | Không| Có         | Có    | Thay thế toàn bộ resource |
-| PATCH   | Không| Không*     | Có    | Cập nhật một phần resource |
-| DELETE  | Không| Có         | Tùy   | Xóa resource |
-
-- **Safe**: Không thay đổi state server
-- **Idempotent**: Gọi nhiều lần = kết quả giống gọi 1 lần (`PUT /users/1` nhiều lần vẫn ra user đó)
+- **Safe**: không thay đổi state server
+- **Idempotent**: gọi N lần = gọi 1 lần (kết quả server giống nhau)
 
 ### HTTP Status Codes
 
-| Nhóm | Ý nghĩa | Codes quan trọng |
-|------|---------|-----------------|
-| 1xx | Informational | 100 Continue, 101 Switching Protocols |
-| 2xx | Success | 200 OK, 201 Created, 204 No Content |
+| Range | Ý nghĩa | Codes quan trọng |
+|-------|---------|-----------------|
+| 1xx | Informational | 100 Continue, 101 Switching Protocols (WebSocket upgrade) |
+| 2xx | Success | 200 OK, 201 Created, 204 No Content, 206 Partial Content |
 | 3xx | Redirection | 301 Moved Permanently, 302 Found, 304 Not Modified, 307 Temporary Redirect |
-| 4xx | Client Error | 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 405 Method Not Allowed, 409 Conflict, 422 Unprocessable Entity, 429 Too Many Requests |
+| 4xx | Client Error | 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict, 422 Unprocessable Entity, 429 Too Many Requests |
 | 5xx | Server Error | 500 Internal Server Error, 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout |
 
-Lưu ý quan trọng:
-- **401 vs 403**: 401 = chưa xác thực (chưa login), 403 = đã xác thực nhưng không có quyền
-- **301 vs 302**: 301 = permanent redirect (browser cache URL mới), 302 = tạm thời
-- **502 vs 503**: 502 = upstream server lỗi, 503 = server quá tải hoặc bảo trì
+### HTTP Versions — Evolution
 
-### HTTP Headers quan trọng
+**HTTP/1.0**: mỗi request mở TCP connection mới → TCP handshake overhead mỗi lần.
 
-**Request Headers:**
-```
-Host: example.com                    # Bắt buộc trong HTTP/1.1
-Accept: application/json, */*
-Accept-Encoding: gzip, deflate, br
-Accept-Language: vi-VN, en-US
-Authorization: Bearer <token>        # Xác thực
-Cookie: session_id=abc123
-Cache-Control: no-cache
-If-None-Match: "etag-value"          # Conditional request
-If-Modified-Since: Mon, 25 May 2026
-User-Agent: Mozilla/5.0 ...
-Origin: https://myapp.com            # CORS
-```
+**HTTP/1.1**:
+- **Persistent connection** (`Connection: keep-alive`): tái sử dụng TCP connection
+- **Pipelining**: gửi nhiều request mà không cần chờ response, nhưng bị **head-of-line blocking** (response phải trả về đúng thứ tự)
+- **Chunked transfer encoding**: stream response mà không cần biết Content-Length trước
 
-**Response Headers:**
-```
-Content-Type: application/json; charset=utf-8
-Content-Length: 1234
-Content-Encoding: gzip
-Cache-Control: max-age=3600, public
-ETag: "abc123def"
-Last-Modified: Mon, 25 May 2026 10:00:00 GMT
-Set-Cookie: session_id=xyz; HttpOnly; Secure; SameSite=Strict
-Access-Control-Allow-Origin: https://myapp.com  # CORS
-Strict-Transport-Security: max-age=31536000; includeSubDomains  # HSTS
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-```
+**HTTP/2**:
+- **Binary framing**: không còn text-based, giảm parsing overhead
+- **Multiplexing**: nhiều request/response song song trên 1 TCP connection — không bị application-level HOL blocking
+- **Header compression (HPACK)**: nén headers, hiệu quả khi headers lặp lại nhiều
+- **Server Push**: server chủ động gửi resource trước khi client hỏi
+- Vẫn bị **TCP-level HOL blocking** khi có packet loss (một packet mất → tất cả streams phải chờ)
 
-### CORS (Cross-Origin Resource Sharing)
+**HTTP/3**:
+- Chạy trên **QUIC** (UDP-based) thay vì TCP
+- Không bị TCP HOL blocking (mỗi QUIC stream độc lập)
+- **0-RTT connection resumption**: kết nối lại không cần handshake đầy đủ
+- TLS 1.3 built-in, bắt buộc
 
-```
-Browser (https://app.com) → GET https://api.example.com/data
+### HTTPS — TLS 1.3 Handshake
 
-1. Preflight (OPTIONS) — với non-simple requests:
-   OPTIONS /data HTTP/1.1
-   Origin: https://app.com
-   Access-Control-Request-Method: POST
-   Access-Control-Request-Headers: Content-Type
-
-2. Server response:
-   Access-Control-Allow-Origin: https://app.com
-   Access-Control-Allow-Methods: GET, POST
-   Access-Control-Allow-Headers: Content-Type
-   Access-Control-Max-Age: 86400
-
-3. Actual request nếu preflight OK
-```
-
-### HTTP/1.1 vs HTTP/2 vs HTTP/3
-
-| Tính năng | HTTP/1.1 | HTTP/2 | HTTP/3 (QUIC) |
-|-----------|----------|--------|----------------|
-| Transport | TCP | TCP | UDP (QUIC) |
-| Text/Binary | Text | Binary (framing) | Binary |
-| Multiplexing | Không (pipelining kém) | Có (streams) | Có |
-| Head-of-Line Blocking | Có (TCP) | Ở TCP level | Không |
-| Header Compression | Không | HPACK | QPACK |
-| Server Push | Không | Có | Có (hạn chế) |
-| Connection per domain | 6-8 | 1 | 1 |
-| 0-RTT | Không | Không | Có |
-
-**HTTP/2 Multiplexing**: Nhiều request/response chạy song song trên 1 TCP connection bằng cơ chế streams. Mỗi stream có stream ID, frames được interleaved.
-
-**HTTP/3 / QUIC**: Chạy trên UDP, tích hợp TLS 1.3, mỗi stream độc lập → không bị head-of-line blocking ở transport layer.
-
-### HTTPS = HTTP + TLS
-
-**TLS 1.3 Handshake (1-RTT)**:
 ```
 Client                              Server
   |                                   |
-  |  ClientHello                      |
-  |  (TLS version, cipher suites,     |
-  |   key_share, random)              |
-  |---------------------------------->|
+  |---- ClientHello ----------------> |  TLS version, cipher suites, client random, key_share (ECDH public key)
   |                                   |
-  |  ServerHello                      |
-  |  (selected cipher, key_share,     |
-  |   Certificate, Finished)          |
-  |<----------------------------------|
+  |<--- ServerHello ---------------- |  Chọn cipher suite, server random, key_share (ECDH public key)
+  |<--- {Certificate} -------------- |  Chứng chỉ X.509 của server
+  |<--- {CertificateVerify} -------- |  Chữ ký số — chứng minh server có private key khớp cert
+  |<--- {Finished} ----------------- |  MAC của toàn bộ handshake
   |                                   |
-  |  (Client verify cert)             |
-  |  Finished                         |
-  |  [Application Data]               |
-  |---------------------------------->|
-  |  [Application Data]               |
-  |<----------------------------------|
+  |---- {Finished} ----------------> |  Client xác nhận
+  |                                   |
+  |<==== Encrypted Application Data ==|  HTTPS traffic bắt đầu
 ```
 
-**Certificate Chain**:
+**TLS 1.3 so với TLS 1.2:**
+- **1-RTT** thay vì 2-RTT
+- **0-RTT** (Early Data) cho session resumption — cẩn thận với replay attack
+- Loại bỏ cipher suites yếu (RSA key exchange, DES, RC4, MD5, SHA-1)
+- **Perfect Forward Secrecy (PFS) bắt buộc**: dùng ECDHE — mỗi session có ephemeral key riêng, leak private key cũ không decrypt được traffic cũ
+
+### Cookie, Session, JWT
+
+| Cơ chế | Lưu ở đâu | Stateful? | Scalable? | Vấn đề bảo mật |
+|--------|-----------|-----------|-----------|----------------|
+| Session ID (cookie) | Server (memory/Redis) | Có | Cần shared storage | Session hijacking nếu không HTTPS |
+| JWT (localStorage) | Client | Không | Tốt | XSS có thể đánh cắp token |
+| JWT (HttpOnly cookie) | Client (cookie) | Không | Tốt | CSRF (cần SameSite=Strict hoặc CSRF token) |
+
+**HttpOnly cookie** không đọc được bằng JavaScript → chống XSS.
+**SameSite=Strict/Lax** → chống CSRF.
+
+### CORS — Cross-Origin Resource Sharing
+
+Browser enforce **Same-Origin Policy**: JS tại `https://app.com` không thể đọc response từ `https://api.com` trừ khi server cho phép.
+
+**Simple request** (GET/POST với simple headers): browser tự gửi, kiểm tra response headers.
+**Preflight** (các method khác hoặc custom headers): browser gửi OPTIONS trước.
+
+```http
+# Preflight request
+OPTIONS /api/data HTTP/1.1
+Origin: https://app.com
+Access-Control-Request-Method: DELETE
+Access-Control-Request-Headers: Authorization
+
+# Server response
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.com
+Access-Control-Allow-Methods: GET, POST, DELETE
+Access-Control-Allow-Headers: Authorization
+Access-Control-Max-Age: 86400
 ```
-Root CA (tự ký, được OS/browser tin tưởng sẵn)
-    └── Intermediate CA (ký bởi Root CA)
-            └── Server Certificate (ký bởi Intermediate CA)
-                    contains: domain, public key, validity, issuer
+
+### HTTP Caching
+
 ```
-
-Browser verify:
-1. Server cert ký bởi Intermediate CA? → check chữ ký
-2. Intermediate CA ký bởi Root CA? → check chữ ký
-3. Root CA có trong trust store không?
-4. Cert chưa hết hạn và không bị revoke (OCSP/CRL)?
-
-### REST Principles (Roy Fielding, 2000)
-
-1. **Client-Server**: Tách biệt UI và data storage
-2. **Stateless**: Mỗi request mang đủ thông tin, server không lưu session client
-3. **Cacheable**: Response phải chỉ rõ có cache được không
-4. **Uniform Interface**: Resource có URI cố định, manipulation qua representations
-5. **Layered System**: Client không biết đang nói chuyện với server hay proxy
-6. **Code on Demand** (tùy chọn): Server có thể gửi code (JavaScript) cho client chạy
-
-### Cookies vs Sessions vs JWT
-
-| | Cookie | Server Session | JWT |
-|-|--------|---------------|-----|
-| Lưu ở đâu | Browser | Server memory/DB | Client (localStorage/cookie) |
-| Stateful/less | Stateful | Stateful | Stateless |
-| Scalability | Tốt | Kém (sticky session hoặc shared store) | Tốt (horizontal scale) |
-| Security | HttpOnly+Secure tốt | An toàn (data ở server) | Không thể revoke dễ (cần blacklist) |
-| Size | ~4KB giới hạn | Không giới hạn | ~1-2KB typical |
-| CSRF risk | Có | Có | Không (nếu không dùng cookie) |
+Cache-Control: max-age=3600          → cache 1 giờ, không cần hỏi server
+Cache-Control: no-cache              → mỗi lần phải validate với server (conditional GET)
+Cache-Control: no-store              → không lưu cache gì cả
+Cache-Control: public                → CDN có thể cache
+Cache-Control: private               → chỉ browser cache, CDN không được cache
+ETag: "abc123"                       → fingerprint của response
+If-None-Match: "abc123"              → browser hỏi "vẫn là abc123 không?" → 304 Not Modified nếu không đổi
+Last-Modified: Wed, 01 Jan 2025...   → server ghi ngày sửa cuối
+If-Modified-Since: Wed, 01 Jan 2025  → browser hỏi "có thay đổi kể từ ngày này không?"
+```
 
 ---
 
 ## Định nghĩa chính xác
 
-**HTTP (HyperText Transfer Protocol)**: Giao thức tầng ứng dụng (RFC 9110) theo mô hình request-response, stateless, chạy trên TCP. Là nền tảng truyền tải dữ liệu trên World Wide Web.
+**HTTP** (Hypertext Transfer Protocol) là stateless, application-layer protocol theo mô hình client-server. Được định nghĩa trong RFC 9110 (HTTP Semantics), RFC 9112 (HTTP/1.1), RFC 9113 (HTTP/2), RFC 9114 (HTTP/3). Stateless: mỗi request độc lập, server không lưu trạng thái giữa các request.
 
-**HTTPS**: HTTP được bảo mật bằng TLS (Transport Layer Security). Cung cấp ba đảm bảo: confidentiality (mã hóa), integrity (không bị sửa đổi), authentication (xác thực server).
-
-**REST (Representational State Transfer)**: Kiến trúc phần mềm cho distributed hypermedia systems, không phải giao thức. API tuân theo REST được gọi là RESTful API.
+**HTTPS** = HTTP + TLS (Transport Layer Security). TLS chạy ở tầng giữa Transport và Application, mã hóa toàn bộ HTTP payload. TLS 1.3 được định nghĩa trong RFC 8446.
 
 ---
 
-## Bảng / Sơ đồ kỹ thuật
+## Đặc điểm kỹ thuật / So sánh HTTP Versions
 
-### HTTP Request-Response Flow qua HTTPS
-
-```
-Browser                 DNS          TCP/TLS          Web Server
-   |                     |               |                 |
-   | DNS query(example.com)              |                 |
-   |-------------------->|               |                 |
-   | IP: 93.184.216.34   |               |                 |
-   |<--------------------|               |                 |
-   |                                     |                 |
-   | TCP SYN                             |                 |
-   |------------------------------------>|                 |
-   | TCP SYN-ACK                         |                 |
-   |<------------------------------------|                 |
-   | TCP ACK                             |                 |
-   |------------------------------------>|                 |
-   |                                     |                 |
-   | TLS ClientHello                     |                 |
-   |------------------------------------>|                 |
-   | TLS ServerHello + Cert              |                 |
-   |<------------------------------------|                 |
-   | TLS Finished (encrypted)            |                 |
-   |------------------------------------>|                 |
-   |                                     |                 |
-   | HTTP GET / (encrypted)              |                 |
-   |------------------------------------>|---------------->|
-   |                                     | HTTP/1.1 GET /  |
-   |                             HTTP/1.1 200 OK           |
-   |<------------------------------------|<----------------|
-   | HTML response (encrypted)           |                 |
-```
-
-### Cache-Control Directives
-
-| Directive | Ý nghĩa |
-|-----------|---------|
-| `max-age=3600` | Cache trong 3600 giây |
-| `no-cache` | Cache nhưng phải validate với server trước khi dùng |
-| `no-store` | Không cache gì cả |
-| `private` | Chỉ browser cache, không CDN/proxy |
-| `public` | CDN/proxy có thể cache |
-| `must-revalidate` | Hết hạn phải revalidate, không dùng stale |
-| `immutable` | Content không bao giờ thay đổi (hash trong URL) |
+| Đặc điểm | HTTP/1.0 | HTTP/1.1 | HTTP/2 | HTTP/3 |
+|-----------|----------|----------|--------|--------|
+| Transport | TCP | TCP | TCP | QUIC (UDP) |
+| Connection | Per-request | Persistent | Persistent | Persistent |
+| Multiplexing | Không | Pipelining (HOL) | Có | Có |
+| Header compression | Không | Không | HPACK | QPACK |
+| Server Push | Không | Không | Có | Có |
+| TLS bắt buộc | Không | Không | Không | Có |
+| RTT handshake | TCP + TLS | TCP + TLS | TCP + TLS | 0-RTT (QUIC) |
+| HOL blocking | App + TCP | App + TCP | Chỉ TCP | Không |
+| Binary framing | Không | Không | Có | Có |
 
 ---
 
 ## Code mẫu
 
-### Python requests library — GET và POST
-
 ```python
 import requests
-import json
+import ssl
+import socket
 
-BASE_URL = "https://jsonplaceholder.typicode.com"
+# ── 1. HTTP GET cơ bản
+response = requests.get("https://httpbin.org/get", timeout=5)
+print(f"Status: {response.status_code}")       # 200
+print(f"Headers: {response.headers['Content-Type']}")
+print(f"Body: {response.json()}")
 
-# --- GET Request ---
-def get_user(user_id: int):
-    headers = {
-        "Accept": "application/json",
-        "Authorization": "Bearer my-token-here",
-    }
-    
-    # requests tự động: DNS, TCP, TLS, HTTP
-    response = requests.get(
-        f"{BASE_URL}/users/{user_id}",
-        headers=headers,
-        timeout=10  # seconds
-    )
-    
-    # Raise exception nếu 4xx hoặc 5xx
-    response.raise_for_status()
-    
-    print(f"Status: {response.status_code}")
-    print(f"Content-Type: {response.headers['Content-Type']}")
-    print(f"Response time: {response.elapsed.total_seconds():.3f}s")
-    
-    return response.json()
+# ── 2. POST với JSON body và headers
+payload = {"username": "alice", "role": "admin"}
+response = requests.post(
+    "https://httpbin.org/post",
+    json=payload,
+    headers={
+        "Authorization": "Bearer token123",
+        "X-Request-ID": "uuid-here"
+    },
+    timeout=5
+)
+print(response.status_code)  # 200
 
+# ── 3. Reuse connection với Session (giống persistent connection)
+session = requests.Session()
+session.headers.update({"Authorization": "Bearer mytoken"})
+r1 = session.get("https://httpbin.org/get")
+r2 = session.get("https://httpbin.org/headers")  # tái dùng TCP connection
 
-# --- POST Request ---
-def create_post(title: str, body: str, user_id: int):
-    payload = {
-        "title": title,
-        "body": body,
-        "userId": user_id
-    }
-    
-    response = requests.post(
-        f"{BASE_URL}/posts",
-        json=payload,         # Tự động set Content-Type: application/json
-        timeout=10
-    )
-    
-    response.raise_for_status()
-    return response.json()
+# ── 4. Kiểm tra TLS certificate
+hostname = "google.com"
+ctx = ssl.create_default_context()
+with ctx.wrap_socket(socket.socket(), server_hostname=hostname) as sock:
+    sock.connect((hostname, 443))
+    cert = sock.getpeercert()
+    print(f"TLS version: {sock.version()}")           # TLSv1.3
+    print(f"Cipher: {sock.cipher()}")
+    print(f"Expires: {cert['notAfter']}")
 
+# ── 5. Retry với exponential backoff
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# --- Session (reuse TCP connection + cookies) ---
-def demo_session():
-    with requests.Session() as session:
-        # Set headers mặc định cho tất cả request trong session
-        session.headers.update({
-            "User-Agent": "MyApp/1.0",
-            "Accept": "application/json"
-        })
-        
-        # Login (server gửi Set-Cookie, session tự lưu cookie)
-        login_resp = session.post(
-            "https://httpbin.org/post",
-            json={"username": "alice", "password": "secret"}
-        )
-        
-        # Request sau tự động gửi cookie
-        data_resp = session.get("https://httpbin.org/cookies")
-        print(data_resp.json())
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,           # delay: 1s, 2s, 4s
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"]
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session = requests.Session()
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
-
-# --- Xử lý lỗi đúng cách ---
-def robust_get(url: str, retries: int = 3):
-    for attempt in range(retries):
-        try:
-            response = requests.get(url, timeout=5)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.Timeout:
-            print(f"Attempt {attempt+1}: Timeout, retrying...")
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                return None  # Không retry với 404
-            if e.response.status_code >= 500:
-                print(f"Server error {e.response.status_code}, retrying...")
-            else:
-                raise  # 4xx khác thì raise luôn
-        except requests.exceptions.ConnectionError:
-            print(f"Connection failed, retrying...")
-    
-    raise Exception(f"Failed after {retries} retries")
-
-
-if __name__ == "__main__":
-    user = get_user(1)
-    print("User:", json.dumps(user, indent=2))
-    
-    post = create_post("Test title", "Test body", user_id=1)
-    print("Created:", json.dumps(post, indent=2))
-```
-
-### HTTP Server đơn giản bằng Python
-
-```python
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self._send_json(200, {"status": "ok"})
-        elif self.path.startswith('/users/'):
-            user_id = self.path.split('/')[-1]
-            self._send_json(200, {"id": int(user_id), "name": "Alice"})
-        else:
-            self._send_json(404, {"error": "Not found"})
-    
-    def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-        data = json.loads(body)
-        
-        # Tạo resource mới
-        new_resource = {"id": 123, **data}
-        self._send_json(201, new_resource, extra_headers={
-            "Location": f"/users/{new_resource['id']}"
-        })
-    
-    def _send_json(self, status: int, data: dict, extra_headers: dict = None):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', len(body))
-        if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
-    
-    def log_message(self, format, *args):
-        print(f"[HTTP] {self.address_string()} - {format % args}")
-
-if __name__ == "__main__":
-    server = HTTPServer(('0.0.0.0', 8080), SimpleHandler)
-    print("Server running on http://localhost:8080")
-    server.serve_forever()
+# ── 6. Xem HTTP/2 status (cần httpx)
+# import httpx
+# with httpx.Client(http2=True) as client:
+#     r = client.get("https://www.google.com")
+#     print(r.http_version)  # HTTP/2
 ```
 
 ---
 
 ## Khi nào dùng / Khi nào KHÔNG dùng
 
-**Dùng HTTP/REST khi:**
-- API công khai, client đa dạng (web, mobile, third-party)
-- CRUD operations đơn giản
-- Cần cacheability (GET requests)
-- Team quen thuộc, không cần schema chặt chẽ
+**HTTPS (dùng luôn luôn):**
+- Mọi production website và API
+- Bất kỳ nơi nào truyền thông tin nhạy cảm (auth, payment, PII)
+- Bắt buộc để dùng HTTP/2 và HTTP/3
+- Google search ranking ưu tiên HTTPS
 
-**Dùng HTTPS luôn luôn khi:**
-- Bất kỳ dữ liệu nhạy cảm nào (password, token, PII)
-- Ngày nay: mọi production web đều phải dùng HTTPS
+**HTTP (chỉ dùng):**
+- Development local (localhost)
+- Internal services trong private network có mTLS hoặc service mesh
 
-**Xem xét thay thế HTTP/REST khi:**
-- Cần real-time hai chiều → WebSocket hoặc SSE
-- Cần hiệu năng cao, schema chặt chẽ → gRPC (HTTP/2 + Protobuf)
-- Cần flexible query → GraphQL
-- Microservices nội bộ → gRPC hoặc message queue
+**HTTP/2 (dùng khi):**
+- Web app với nhiều API request cùng lúc (multiplexing)
+- Muốn giảm latency nhờ header compression
 
-**Không nên dùng REST khi:**
-- Cần streaming dữ liệu liên tục (ticker, sensor)
-- Cần binary protocol hiệu năng cao giữa services
+**HTTP/3 (dùng khi):**
+- Mobile app (network thay đổi thường xuyên)
+- Video streaming, real-time application
+- Môi trường có packet loss cao (Wi-Fi kém, mobile)
+
+---
+
+## So sánh với các giao thức liên quan
+
+| | HTTP/REST | WebSocket | gRPC | GraphQL |
+|-|-----------|-----------|------|---------|
+| Pattern | Request-Response | Bidirectional stream | RPC / Streaming | Query-based |
+| Protocol | HTTP/1.1, 2, 3 | Upgrade từ HTTP | HTTP/2 | HTTP |
+| Real-time | Không (cần polling/SSE) | Có | Có (server streaming) | Subscription |
+| Type safety | Không (JSON) | Không | Có (Protobuf) | Partial (schema) |
+| Overhead | Medium | Low | Very low | Medium |
+| Use case | REST API | Chat, games, live | Microservices | Flexible data query |
 
 ---
 
 ## Lỗi thường gặp (Common Pitfalls)
 
-1. **Dùng GET để thay đổi state**: `GET /deleteUser?id=1` là sai — GET phải safe. Proxy và browser có thể cache hoặc prefetch GET request.
-
-2. **Nhầm 401 và 403**: 401 = "Bạn là ai?" (cần authentication), 403 = "Tôi biết bạn là ai nhưng bạn không có quyền" (authorization failed).
-
-3. **Không handle 429 Too Many Requests**: Cần implement exponential backoff + jitter khi retry.
-
-4. **Cache-Control sai trên private data**: Thiếu `private` directive → CDN/proxy cache dữ liệu nhạy cảm của user.
-
-5. **CORS misconfiguration**: `Access-Control-Allow-Origin: *` với `Access-Control-Allow-Credentials: true` → browser chặn (không cho phép).
-
-6. **HTTP/1.1 Keep-Alive hiểu sai**: Connection reuse không phải multiplexing. HTTP/1.1 vẫn phải xử lý request tuần tự trên 1 connection.
-
-7. **Không set timeout**: `requests.get(url)` mặc định không timeout → treo indefinitely.
-
-8. **Body trong GET request**: Về mặt spec cho phép nhưng nhiều server/proxy/firewall bỏ qua. Tránh dùng body trong GET.
+- **PUT vs PATCH nhầm lẫn**: PUT phải gửi toàn bộ resource — nếu gửi partial thì server có thể xóa các field không gửi. Dùng PATCH cho partial update.
+- **401 vs 403 nhầm**: 401 = chưa authenticated (không có/sai token), 403 = đã authenticated nhưng không có quyền.
+- **Caching endpoint có side effect**: GET endpoint có side effect sẽ bị browser/CDN cache, gây data stale.
+- **CORS `*` với credentials**: `Access-Control-Allow-Origin: *` không hoạt động khi `credentials: true` — phải chỉ định origin cụ thể.
+- **Không validate TLS cert**: `verify=False` trong requests library → MITM attack.
+- **JWT trong localStorage**: dễ bị XSS. Dùng HttpOnly cookie.
+- **Không đặt timeout**: request có thể hang vô hạn → connection pool exhaustion.
+- **HTTP/1.1 với quá nhiều domain**: browser giới hạn 6 TCP connections/domain — dùng HTTP/2 hoặc domain sharding (legacy).
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-1. **HTTP stateless nghĩa là gì? Làm sao duy trì state?**
-   - Server không lưu thông tin về request trước. Duy trì state qua: Cookie (browser gửi kèm mỗi request), JWT token trong Authorization header, Server-side session với session ID.
-
-2. **Sự khác biệt PUT và PATCH?**
-   - PUT: thay thế toàn bộ resource (idempotent). PATCH: cập nhật một phần (không bắt buộc idempotent theo RFC).
-
-3. **Làm sao HTTPS bảo vệ dữ liệu?**
-   - TLS handshake: xác thực server (certificate), trao đổi symmetric key qua asymmetric encryption, sau đó mã hóa symmetric. Cung cấp: encryption, integrity (HMAC), authentication.
-
-4. **HTTP/2 cải thiện gì so với HTTP/1.1?**
-   - Multiplexing (multiple streams on 1 connection), header compression (HPACK), binary framing, server push.
-
-5. **CORS là gì và tại sao tồn tại?**
-   - Same-Origin Policy: browser chặn JS gửi request đến domain khác. CORS là cơ chế server cho phép cross-origin request bằng response headers.
-
-6. **Idempotent nghĩa là gì? Tại sao quan trọng?**
-   - Gọi N lần = kết quả giống gọi 1 lần. Quan trọng cho retry logic: nếu không biết request đã thành công chưa, có thể safely retry idempotent requests.
-
-7. **Giải thích TLS certificate chain hoạt động thế nào?**
-   - Browser tin Root CA sẵn, Root CA ký Intermediate CA, Intermediate CA ký Server cert. Chain of trust cho phép verify server cert mà không cần trust trực tiếp.
-
-8. **Cookie HttpOnly và Secure flag có tác dụng gì?**
-   - HttpOnly: JS không thể đọc cookie (chống XSS lấy cắp cookie). Secure: chỉ gửi qua HTTPS (chống network sniffing).
+- GET vs POST — sự khác biệt, khi nào dùng cái nào?
+- Idempotent là gì? Tại sao DELETE được coi là idempotent?
+- Sự khác biệt chính giữa HTTP/1.1, HTTP/2, HTTP/3?
+- TLS handshake hoạt động như thế nào? Tại sao cần 3-way TCP + TLS?
+- Perfect Forward Secrecy là gì và tại sao quan trọng?
+- CORS là gì? Tại sao browser enforce CORS nhưng Postman thì không?
+- 401 vs 403 — khi nào dùng cái nào?
+- Cookie HttpOnly vs localStorage — cái nào bảo mật hơn, tại sao?
+- ETag và Cache-Control hoạt động như thế nào?
+- HTTP/2 multiplexing giải quyết vấn đề gì của HTTP/1.1?

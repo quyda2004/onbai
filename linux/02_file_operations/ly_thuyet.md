@@ -1,297 +1,329 @@
-# Linux File Operations — Thao tác với Tập tin
+# Linux File Operations — Thao tác với File
 
 ---
 
-## Giải thích cho người mới hoàn toàn
+## Giải thích cho người mới
 
-Hãy nghĩ file trong Linux giống như tài liệu giấy trong văn phòng. `cp` (copy) giống như dùng máy photocopy — bạn tạo ra bản sao y hệt, bản gốc vẫn còn đó. `mv` (move) giống như nhấc tờ giấy đặt vào ngăn kéo khác — hoặc đổi tên nó. `rm` (remove) là ném vào máy hủy tài liệu — **không có thùng rác**, không khôi phục được dễ dàng.
+File trong Linux giống như đồ vật trong phòng. Bạn có thể:
+- **Xem nội dung**: đọc tờ giấy (`cat`, `less`, `head`)
+- **Sao chép**: photo-copy (`cp`)
+- **Di chuyển / Đổi tên**: chuyển sang phòng khác (`mv`)
+- **Xóa**: vứt vào thùng rác — **không có thùng rác** trong terminal! (`rm`)
+- **Tạo mới**: tạo tờ giấy trắng (`touch`, `mkdir`)
 
-`ln` (link) là khái niệm thú vị: hãy tưởng tượng một bản tài liệu có hai cái tên trên hai cái kệ khác nhau, nhưng thực ra chỉ là một tờ giấy duy nhất (hard link). Hoặc một tờ giấy ghi "hãy xem tài liệu ở kệ A" (symbolic link — giống shortcut trên Windows).
-
-`tar` giống như máy đóng gói — bạn nhét nhiều file vào một hộp, có thể nén lại để tiết kiệm không gian, rồi gửi đi hay lưu trữ.
-
----
-
-## Giải thích cho người đã biết lập trình (nâng cao)
-
-**Inode và hard link:** Mỗi file có một inode chứa metadata và data block pointers. Directory entry chỉ là ánh xạ `(tên → inode_number)`. Hard link là tạo thêm một directory entry trỏ tới cùng inode — inode có field `link count`. File thực sự bị xóa khỏi disk khi `link count = 0` và không có process nào đang mở file. Đây là cơ chế `rm` — nó giảm link count, không xóa data ngay lập tức.
-
-**Symbolic link:** Là file đặc biệt chứa đường dẫn (string) tới target. Nếu target bị xóa, symlink trở thành "dangling". Symlink có thể trỏ cross-filesystem, hard link thì không (vì inode là per-filesystem).
-
-**`cp -p` và timestamps:** Khi copy file, mtime/atime mặc định bị reset. `-p` (preserve) giữ nguyên permissions, timestamps, owner — quan trọng khi backup.
-
-**`rsync` algorithm (rsync delta transfer):** rsync tính rolling checksum của từng block, so sánh với source. Chỉ transfer những block khác nhau — cực kỳ hiệu quả cho sync incremental. `-z` compress data trong transit (tốt cho mạng chậm), không cần thiết trên local disk.
-
-**`dd` và block I/O:** `dd` làm việc ở block level, bỏ qua filesystem. Dùng để backup MBR (`dd if=/dev/sda bs=512 count=1`), tạo disk image, test I/O speed (`dd if=/dev/zero of=/tmp/test bs=1M count=100`).
-
-**`stat` syscall:** Lệnh `stat` gọi syscall cùng tên, trả về `struct stat` với 3 loại timestamp: `atime` (access time — đọc file), `mtime` (modify time — sửa nội dung), `ctime` (change time — sửa metadata/inode, không phải content).
+⚠️ **Cảnh báo**: `rm` trong Linux **xóa vĩnh viễn**, không có Recycle Bin!
 
 ---
 
-## Các lệnh / Cú pháp chính
+## Giải thích nâng cao
 
-| Lệnh | Mô tả | Ví dụ |
-|------|-------|-------|
-| `cp src dst` | Copy file | `cp file.txt backup.txt` |
-| `cp -r src/ dst/` | Copy thư mục đệ quy | `cp -r /etc/ /backup/etc/` |
-| `cp -p src dst` | Giữ nguyên permissions/timestamps | `cp -p important.conf backup.conf` |
-| `cp -u src dst` | Chỉ copy nếu src mới hơn dst | `cp -u *.py ~/backup/` |
-| `cp --backup src dst` | Backup file cũ trước khi ghi đè | `cp --backup file.txt file.txt` |
-| `mv src dst` | Di chuyển hoặc đổi tên | `mv old.txt new.txt` |
-| `mv -i src dst` | Hỏi trước khi ghi đè | `mv -i *.txt /backup/` |
-| `mv -n src dst` | Không ghi đè nếu dst tồn tại | `mv -n file.txt /dst/` |
-| `rm file` | Xóa file | `rm temp.txt` |
-| `rm -r dir/` | Xóa thư mục đệ quy | `rm -r old_project/` |
-| `rm -f file` | Force xóa, không hỏi | `rm -f *.lock` |
-| `rm -rf dir/` | Force xóa đệ quy — CẨN THẬN | `rm -rf /tmp/cache/` |
-| `rm -i file` | Hỏi từng file trước khi xóa | `rm -i *.log` |
-| `mkdir dir` | Tạo thư mục | `mkdir projects` |
-| `mkdir -p a/b/c` | Tạo nested directories | `mkdir -p src/main/java` |
-| `touch file` | Tạo file rỗng / update timestamp | `touch newfile.txt` |
-| `file foo` | Xác định loại file | `file /bin/bash` |
-| `stat file` | Metadata chi tiết | `stat /etc/passwd` |
-| `ln src link` | Tạo hard link | `ln data.txt data_link.txt` |
-| `ln -s src link` | Tạo symbolic link | `ln -s /usr/bin/python3 python` |
-| `dd if=src of=dst` | Copy block-level | `dd if=/dev/sda of=disk.img` |
-| `rsync -avz src/ dst/` | Sync thư mục với delta | `rsync -avz ~/projects/ server:~/` |
-| `tar -czf archive.tar.gz dir/` | Nén thư mục (gzip) | `tar -czf backup.tar.gz /etc/` |
-| `tar -xzf archive.tar.gz` | Giải nén | `tar -xzf backup.tar.gz -C /tmp/` |
-| `tar -tzf archive.tar.gz` | Liệt kê nội dung | `tar -tzf backup.tar.gz` |
+**File types trong Linux** (xem bằng `ls -la` — ký tự đầu tiên):
+```
+-   regular file
+d   directory
+l   symbolic link
+b   block device (/dev/sda)
+c   character device (/dev/tty)
+p   named pipe (FIFO)
+s   socket
+```
+
+**Copy-on-Write**: filesystem như Btrfs/ZFS dùng CoW — khi copy file lớn không tốn disk ngay lập tức, chỉ tạo reference. Khi có sửa đổi mới snapshot data.
+
+**Hard link vs Symbolic link**:
+- Hard link: 2 tên trỏ cùng inode → xóa 1 tên, data vẫn còn (reference count > 0). Không cross filesystem.
+- Soft link (symlink): như shortcut Windows — trỏ đến path. Xóa file gốc → symlink bị "dangling" (broken).
 
 ---
 
-## Ví dụ thực tế
+## BẢNG LỆNH THỰC HÀNH
 
+### cat — Xem nội dung file
 ```bash
-# ===== cp — Copy =====
-cp file.txt backup.txt               # copy file đơn
-cp -r /etc/nginx/ /backup/nginx/     # copy thư mục
-cp -rp /home/user/ /backup/user/     # copy + giữ permissions, timestamps
-cp -u *.log /backup/logs/            # chỉ copy file mới hơn
-cp -v file.txt /backup/              # verbose: hiện tiến trình
+cat file.txt                   # in toàn bộ file
+cat -n file.txt                # in kèm số dòng
+cat -A file.txt                # hiện ký tự ẩn (tabs ^I, newlines $)
+cat file1.txt file2.txt        # nối và in 2 file
+cat file1.txt file2.txt > combined.txt   # nối vào file mới
 
-# ===== mv — Move/Rename =====
-mv old_name.txt new_name.txt         # đổi tên
-mv *.jpg /photos/2024/               # di chuyển tất cả .jpg
-mv -i important.conf /etc/           # hỏi trước khi ghi đè
-# Batch rename: thêm prefix
-for f in *.txt; do mv "$f" "backup_$f"; done
+# Tạo file từ stdin
+cat > newfile.txt              # gõ nội dung, Ctrl+D để kết thúc
+cat >> existing.txt            # append vào cuối file
 
-# ===== rm — Xóa an toàn =====
-rm file.txt                          # xóa file đơn
-rm -ri /tmp/old_data/                # xóa đệ quy, hỏi từng file
-# Thay thế an toàn: trash-cli
-trash-put file.txt                   # vào recycle bin (cần cài)
-trash-list                           # xem danh sách
-trash-restore                        # khôi phục
+# Tránh dùng cat khi không cần
+grep "error" < file.txt        # dùng stdin redirect thay vì: cat file | grep
+```
 
-# NGUY HIỂM — ví dụ kinh điển:
-# rm -rf / --no-preserve-root        # XÓA TOÀN BỘ HỆ THỐNG
-# rm -rf $UNDEFINED_VAR/tmp/         # nếu var rỗng => rm -rf /tmp/
+### less / more — Xem file dài
+```bash
+less file.txt                  # xem từng trang (q để thoát)
+less +G file.txt               # mở ở cuối file (xem log)
+less +F file.txt               # follow mode (như tail -f)
+less -N file.txt               # hiện số dòng
 
-# ===== mkdir =====
-mkdir -p ~/projects/myapp/{src,tests,docs}  # tạo cấu trúc cùng lúc
-mkdir -m 700 /tmp/private                   # tạo với permissions cụ thể
+# Trong less:
+# /pattern    tìm kiếm xuôi
+# ?pattern    tìm kiếm ngược
+# n           next match
+# N           prev match
+# g           đầu file
+# G           cuối file
+# q           thoát
 
-# ===== touch =====
-touch newfile.txt                    # tạo file rỗng
-touch -t 202401011200 file.txt       # set timestamp cụ thể (YYYYMMDDhhmm)
-touch -r reference.txt target.txt   # copy timestamp từ file khác
+more file.txt                  # đơn giản hơn less, chỉ cuộn xuống
+```
 
-# ===== file & stat =====
-file /bin/ls                         # ELF 64-bit LSB executable...
-file image.jpg                       # JPEG image data...
-file /etc/passwd                     # ASCII text
-stat /etc/passwd
-# File: /etc/passwd
-# Size: 2847      Blocks: 8    IO Block: 4096  regular file
-# Inode: 131074   Links: 1
-# Access: 2024-01-15 10:30:00  (atime)
-# Modify: 2024-01-10 08:00:00  (mtime — nội dung)
-# Change: 2024-01-10 08:00:00  (ctime — metadata/inode)
+### head / tail — Xem đầu/cuối file
+```bash
+head file.txt                  # 10 dòng đầu (mặc định)
+head -n 20 file.txt            # 20 dòng đầu
+head -n -5 file.txt            # tất cả trừ 5 dòng cuối
+head -c 100 file.txt           # 100 bytes đầu
+head -c 1M file.txt            # 1MB đầu
 
-# ===== ln — Hard link vs Symbolic link =====
-# Hard link: cùng inode, cùng data
-ln /home/user/data.txt /backup/data.txt
-stat data.txt    # Links: 2
+tail file.txt                  # 10 dòng cuối
+tail -n 20 file.txt            # 20 dòng cuối
+tail -n +5 file.txt            # từ dòng 5 đến cuối
+tail -f /var/log/syslog        # follow — real-time (xem log)
+tail -F /var/log/nginx/access.log  # follow + reopen nếu file rotate
 
-# Symbolic link: pointer đến path
-ln -s /home/user/projects ~/projects     # symlink trong ~
-ln -s /usr/bin/python3 /usr/local/bin/python  # alias python
-ls -la ~/projects                        # projects -> /home/user/projects
+# Xem từ dòng 50 đến 60:
+sed -n '50,60p' file.txt       # hoặc:
+awk 'NR>=50 && NR<=60' file.txt
+```
 
-# Kiểm tra symlink
-readlink ~/projects                      # /home/user/projects
-readlink -f ~/projects/subdir            # resolve toàn bộ đường dẫn
+### cp — Copy
+```bash
+cp file.txt backup.txt         # copy file
+cp file.txt /tmp/              # copy đến thư mục khác
+cp file.txt /tmp/newname.txt   # copy và đổi tên
 
-# ===== dd =====
-# Backup MBR (512 bytes đầu của disk)
-sudo dd if=/dev/sda of=~/mbr_backup.img bs=512 count=1
+cp -r dir/ newdir/             # copy recursive (thư mục)
+cp -r dir/ /backup/            # copy thư mục đến đích khác
 
-# Tạo disk image
-sudo dd if=/dev/sdb of=~/usb_backup.img bs=4M status=progress
+cp -p file.txt backup.txt      # preserve permissions, timestamps
+cp -a dir/ backup/             # archive mode (= -dpr, giữ mọi thứ)
+cp -u file.txt backup.txt      # chỉ copy nếu src mới hơn dst
+cp -i file.txt existing.txt    # hỏi trước khi overwrite
+cp -v file.txt backup.txt      # verbose — in từng file
 
-# Tạo file test 1GB toàn zero (test filesystem)
-dd if=/dev/zero of=/tmp/testfile bs=1M count=1024 status=progress
+# Copy nhiều file
+cp file1.txt file2.txt file3.txt /destination/
+cp *.txt /destination/
+cp -r {dir1,dir2,dir3} /destination/
+```
 
-# Test tốc độ ghi disk
-dd if=/dev/zero of=/tmp/speedtest bs=1M count=512 oflag=direct status=progress
+### mv — Move / Rename
+```bash
+mv old.txt new.txt             # đổi tên (trong cùng filesystem)
+mv file.txt /tmp/              # di chuyển
+mv file.txt /tmp/newname.txt   # di chuyển và đổi tên
 
-# ===== rsync =====
-# Sync local
-rsync -av /source/dir/ /dest/dir/          # trailing / quan trọng!
+mv -i file.txt dest/           # hỏi trước khi overwrite
+mv -u file.txt dest/           # chỉ move nếu src mới hơn dst
+mv -v *.log /archive/          # verbose
 
-# Sync tới remote server
-rsync -avz ~/projects/ user@server:~/projects/
+# Rename hàng loạt (cần rename hoặc loop)
+for f in *.txt; do mv "$f" "${f%.txt}.bak"; done
+rename 's/\.txt$/.bak/' *.txt  # dùng rename (Perl)
+```
 
-# Sync và xóa file không còn ở source
-rsync -av --delete ~/backup/ /external/backup/
+### rm — Remove (XÓA VĨNH VIỄN!)
+```bash
+rm file.txt                    # xóa file
+rm file1.txt file2.txt         # xóa nhiều file
+rm *.log                       # xóa tất cả .log
 
-# Loại trừ file/thư mục
-rsync -av --exclude="*.log" --exclude=".git/" src/ dst/
+rm -r directory/               # xóa thư mục recursive
+rm -rf directory/              # xóa không hỏi (-f = force)
+rm -i file.txt                 # hỏi trước khi xóa (SAFE)
+rm -v file.txt                 # verbose
 
-# Dry run — xem trước sẽ làm gì
-rsync -avn --delete ~/src/ ~/dst/
+# ⚠️ NGUY HIỂM - ĐỪNG CHẠY:
+# rm -rf /          → xóa toàn bộ hệ thống
+# rm -rf ~/*        → xóa toàn bộ home dir
+# rm -rf ./         → xóa thư mục hiện tại và mọi thứ trong đó
 
-# Giới hạn bandwidth (KB/s)
-rsync -av --bwlimit=1000 /large/dir/ server:~/
+# An toàn hơn: dùng trash-cli
+# trash file.txt     → đưa vào trash
+# trash-list         → xem trash
+# trash-restore      → restore
+```
 
-# ===== tar =====
-# Nén với gzip (.tar.gz hoặc .tgz)
-tar -czf archive.tar.gz /path/to/dir/
-tar -czf archive.tar.gz file1.txt file2.txt
+### mkdir — Make Directory
+```bash
+mkdir newdir                   # tạo thư mục
+mkdir dir1 dir2 dir3           # tạo nhiều thư mục cùng lúc
+mkdir -p path/to/nested/dir    # tạo nested (kể cả parent nếu chưa có)
+mkdir -p project/{src,test,docs,build}  # tạo nhiều sub-dir cùng lúc
+mkdir -m 755 newdir            # tạo với permission cụ thể
+mkdir -v newdir                # verbose
+```
 
-# Nén với bzip2 (.tar.bz2) — nén tốt hơn, chậm hơn
-tar -cjf archive.tar.bz2 /path/to/dir/
+### rmdir — Remove Directory (chỉ xóa dir rỗng)
+```bash
+rmdir emptydir                 # chỉ xóa nếu rỗng
+rmdir -p path/to/nested/       # xóa nested nếu rỗng
+# Xóa thư mục có nội dung: dùng rm -r
+```
 
-# Nén với xz (.tar.xz) — nén tốt nhất, chậm nhất
-tar -cJf archive.tar.xz /path/to/dir/
+### touch — Tạo file / Cập nhật timestamp
+```bash
+touch newfile.txt              # tạo file rỗng (hoặc cập nhật timestamp nếu đã tồn tại)
+touch file1.txt file2.txt      # nhiều file
+touch -t 202401150930 file.txt # set timestamp cụ thể (YYYYMMDDhhmm)
+touch -r reference.txt file.txt # copy timestamp từ file khác
+touch -a file.txt              # chỉ cập nhật access time
+touch -m file.txt              # chỉ cập nhật modification time
+```
 
-# Giải nén vào thư mục cụ thể
-tar -xzf archive.tar.gz -C /tmp/extract/
+### ln — Create Links
+```bash
+# Hard link
+ln original.txt hardlink.txt   # tạo hard link
+ls -li original.txt hardlink.txt  # cùng inode number!
 
-# Xem nội dung không giải nén
-tar -tzf archive.tar.gz
+# Symbolic link (symlink)
+ln -s /path/to/original symlink_name    # tạo symlink
+ln -s /usr/bin/python3 /usr/local/bin/python  # symlink python
+ln -s $(pwd)/script.sh ~/bin/script     # symlink với absolute path
 
-# Thêm file vào archive đã có
-tar -rzf archive.tar.gz newfile.txt   # chỉ dùng với gzip
+ln -sf newfile.txt symlink.txt  # force overwrite existing symlink
+ls -la symlink.txt             # xem symlink trỏ đến đâu
+readlink symlink.txt           # in đường dẫn thực
+readlink -f symlink.txt        # resolve all symlinks (canonical path)
+```
 
-# Giải nén file cụ thể từ archive
-tar -xzf archive.tar.gz path/to/specific/file.txt
+### file — Xác định loại file
+```bash
+file image.jpg                 # JPEG image data
+file script                    # ELF 64-bit LSB executable
+file archive.tar.gz            # gzip compressed data
+file unknown                   # ASCII text, with CRLF line terminators
+file -i image.jpg              # MIME type: image/jpeg; charset=binary
+```
+
+### wc — Word Count
+```bash
+wc file.txt                    # lines words bytes
+wc -l file.txt                 # chỉ đếm dòng (lines)
+wc -w file.txt                 # chỉ đếm từ (words)
+wc -c file.txt                 # chỉ đếm bytes
+wc -m file.txt                 # đếm characters (UTF-8 aware)
+wc -l *.log                    # đếm dòng trong nhiều file
+find . -name "*.py" | xargs wc -l | tail -1  # tổng dòng code
+```
+
+### stat — File Statistics
+```bash
+stat file.txt                  # thông tin chi tiết (inode, permissions, timestamps)
+stat -c "%n %s %y" file.txt    # format: name size modification_time
+stat --format="%A %U %G" file.txt   # permissions owner group
+```
+
+### Redirection — Chuyển hướng output
+```bash
+# Output redirection
+command > file.txt             # stdout → file (overwrite)
+command >> file.txt            # stdout → file (append)
+command 2> error.txt           # stderr → file
+command 2>> error.txt          # stderr → file (append)
+command &> output.txt          # stdout + stderr → file
+command > output.txt 2>&1      # stdout + stderr → file (POSIX)
+command > /dev/null 2>&1       # bỏ toàn bộ output
+
+# Input redirection
+command < input.txt            # đọc input từ file
+command << EOF                 # here-document
+This is input
+EOF
+
+command <<< "string"           # here-string
+
+# Pipe
+command1 | command2            # stdout của cmd1 → stdin của cmd2
+command1 |& command2           # stdout + stderr → cmd2
+tee file.txt                   # đọc stdin, ghi vào file VÀ stdout
+command | tee output.txt | wc -l  # vừa save vừa tiếp tục pipeline
+```
+
+### Nén / Giải nén
+```bash
+# tar
+tar -czf archive.tar.gz dir/          # tạo .tar.gz
+tar -cjf archive.tar.bz2 dir/         # tạo .tar.bz2
+tar -cJf archive.tar.xz dir/          # tạo .tar.xz (nhỏ nhất)
+tar -xzf archive.tar.gz               # giải nén .tar.gz
+tar -xzf archive.tar.gz -C /dest/     # giải nén vào thư mục khác
+tar -tzf archive.tar.gz               # xem nội dung không giải nén
+tar -xzf archive.tar.gz file.txt      # chỉ giải nén file cụ thể
+
+# gzip
+gzip file.txt                  # nén → file.txt.gz (xóa file gốc)
+gzip -k file.txt               # giữ file gốc (-k = keep)
+gzip -d file.txt.gz            # giải nén (= gunzip)
+gzip -9 file.txt               # nén tối đa (chậm hơn)
+gunzip file.txt.gz             # giải nén
+
+# zip (cross-platform)
+zip archive.zip file1 file2    # tạo zip
+zip -r archive.zip dir/        # zip thư mục
+unzip archive.zip              # giải nén
+unzip archive.zip -d /dest/    # giải nén vào thư mục
+unzip -l archive.zip           # xem nội dung
+
+# rsync — sync thư mục (tốt hơn cp cho large data)
+rsync -av source/ dest/        # sync, archive mode, verbose
+rsync -avz source/ user@server:/dest/   # qua SSH
+rsync --delete source/ dest/   # xóa file ở dest nếu không có ở source
+rsync -n source/ dest/         # dry-run — xem sẽ làm gì
 ```
 
 ---
 
-## Kết hợp lệnh nâng cao (Pipes & Patterns)
+## Khi nào dùng gì
 
-```bash
-# Backup /etc với timestamp trong tên file
-tar -czf /backup/etc_$(date +%Y%m%d_%H%M%S).tar.gz /etc/ 2>/dev/null
-
-# Xóa file log cũ hơn 30 ngày, giữ lại ít nhất 5 file mới nhất
-ls -t /var/log/*.log | tail -n +6 | xargs -I {} find {} -mtime +30 -delete
-
-# Copy cấu trúc thư mục không có file
-find /source -type d | sed 's/\/source/\/dest/' | xargs mkdir -p
-
-# So sánh hai thư mục, tìm file khác nhau
-diff <(find /dir1 -type f -printf '%P\n' | sort) \
-     <(find /dir2 -type f -printf '%P\n' | sort)
-
-# Tìm hard link của một file
-find / -samefile /path/to/file 2>/dev/null
-
-# Xóa symlink bị broken (dangling)
-find /usr/local/bin -type l ! -exec test -e {} \; -delete
-
-# Sync + backup với versioning
-rsync -av --backup --backup-dir=/backup/$(date +%Y%m%d) \
-  --delete /source/ /current/
-
-# tar qua SSH — backup remote không cần disk tạm
-ssh user@server "tar -czf - /etc/" > /local/backup/server_etc.tar.gz
-
-# Giải nén và xem tiến trình
-tar -xzf largefile.tar.gz | pv -p -b > /dev/null
-```
+| Tình huống | Lệnh |
+|-----------|------|
+| Xem file nhỏ | `cat file.txt` |
+| Xem file lớn | `less file.txt` |
+| Xem log real-time | `tail -f /var/log/...` |
+| Copy giữ metadata | `cp -a` hoặc `rsync -a` |
+| Đổi tên file | `mv` |
+| Xóa an toàn (hỏi trước) | `rm -i` |
+| Tạo backup nhanh | `cp -a dir/ dir.bak/` |
+| Sync thư mục lớn | `rsync -av src/ dst/` |
+| Nén để transfer | `tar -czf archive.tar.gz dir/` |
 
 ---
 
-## Lỗi thường gặp (Common Pitfalls)
+## Lỗi thường gặp
 
-**1. `rm -rf` với trailing slash sai vị trí**
 ```bash
-# THẢM HỌA tiềm ẩn:
-DIR="/mydata/"
-rm -rf $DIR   # nếu DIR="" thì => rm -rf /
+# Xóa nhầm vì globbing
+rm -rf *.txt        # ổn nếu có *.txt, nhưng...
+rm -rf * .txt       # NGUY HIỂM: rm -rf * xóa hết, rồi xóa .txt
+# → Dùng: set -f để disable globbing, hoặc rm -rf -- *.txt
 
-# An toàn hơn:
-[[ -z "$DIR" ]] && exit 1
-rm -rf "${DIR:?'DIR is empty'}"
-```
+# cp không copy hidden files
+cp dir/* dest/      # KHÔNG copy .hidden files
+cp -r dir/. dest/   # copy TẤT CẢ kể cả hidden
+rsync -a dir/ dest/ # cách tốt nhất
 
-**2. `cp -r src/ dst/` vs `cp -r src dst/`**
-```bash
-cp -r src/ dst/   # copy NỘI DUNG của src vào dst (dst/file1, dst/file2)
-cp -r src dst/    # copy THƯ MỤC src vào dst (dst/src/file1)
-# Tương tự rsync: trailing / quan trọng!
-```
+# mv: overwrite không hỏi
+mv -i old.txt existing.txt   # thêm -i để hỏi trước
 
-**3. Hard link không hoạt động cross-filesystem**
-```bash
-ln /home/user/file.txt /mnt/usb/file.txt  # LỖI: cross-device link
-# Dùng symlink thay thế:
-ln -s /home/user/file.txt /mnt/usb/file.txt
-```
-
-**4. Symlink relative vs absolute**
-```bash
-# Absolute symlink — luôn đúng
-ln -s /abs/path/to/target linkname
-# Relative symlink — chỉ đúng nếu link và target cùng relative position
-ln -s ../target linkname
-# Dùng ln -sf để replace symlink cũ
-```
-
-**5. `stat` ctime là "change time" không phải "create time"**
-```bash
-# ctime thay đổi khi: chmod, chown, rename, write
-# Linux không lưu creation time (birthtime) trong ext4 mặc định
-stat --format="%w" file  # birthtime trên ext4 với kernel mới
-```
-
-**6. `tar` không bao gồm leading `/` khi extract**
-```bash
-tar -czf backup.tar.gz /etc/passwd   # lưu dưới dạng etc/passwd (không có /)
-tar -xzf backup.tar.gz               # extract ra ./etc/passwd
-# Giải nén về đúng vị trí:
-tar -xzf backup.tar.gz -C / --strip-components=0
-```
-
-**7. rsync trailing slash**
-```bash
-rsync -av /src/    /dst/   # copy NỘI DUNG src vào dst
-rsync -av /src     /dst/   # copy THƯ MỤC src vào dst (tạo /dst/src/)
+# tar: quên -C khi extract
+tar -xzf archive.tar.gz      # extract vào thư mục hiện tại
+tar -xzf archive.tar.gz -C /dest/  # extract vào đúng thư mục
 ```
 
 ---
 
 ## Câu hỏi phỏng vấn hay gặp
 
-**Q1: Sự khác biệt giữa hard link và symbolic link?**
-> Hard link: cùng inode, không thể cross-filesystem, nếu xóa file gốc thì link vẫn truy cập được data (vì cùng inode). Symbolic link: file riêng chứa đường dẫn, có thể cross-filesystem, nếu target bị xóa thì link bị "dangling". `ls -la` hiện symlink với `->`.
-
-**Q2: Tại sao `rm` không thể xóa thư mục nếu không có `-r`?**
-> `rm` mặc định gọi `unlink()` syscall, chỉ hoạt động trên file. Directory cần `rmdir()` syscall (chỉ xóa được thư mục rỗng) hoặc duyệt đệ quy để xóa từng file rồi mới xóa thư mục. Flag `-r` bật behavior đó.
-
-**Q3: Giải thích `atime`, `mtime`, `ctime`?**
-> `atime` (access): cập nhật khi file được đọc. `mtime` (modify): cập nhật khi nội dung file thay đổi. `ctime` (change): cập nhật khi inode thay đổi (chmod, chown, rename, hoặc mtime thay đổi). `ctime` không phải "creation time". Nhiều filesystem mount với `noatime` để tăng performance.
-
-**Q4: `cp` vs `rsync` — khi nào dùng cái nào?**
-> `cp` đơn giản hơn, tốt cho copy one-off. `rsync` hiệu quả hơn cho sync incremental (chỉ copy delta), có progress indicator, bandwidth throttling, dry-run mode, và bảo toàn metadata tốt hơn. Cho backup scripts, luôn dùng `rsync`.
-
-**Q5: Tại sao `dd` nguy hiểm?**
-> `dd` không kiểm tra, không hỏi, không có safety net. `dd if=/dev/sda of=/dev/sdb` ghi đè toàn bộ `/dev/sdb` mà không báo lỗi. Nhầm `if` và `of` có thể xóa toàn bộ disk nguồn. Luôn double-check lệnh trước khi Enter.
-
-**Q6: File bị xóa nhưng vẫn chiếm disk space — tại sao?**
-> Process đang giữ file descriptor open. `unlink()` xóa directory entry (giảm link count), nhưng inode và data blocks chỉ được giải phóng khi link count = 0 VÀ không có open file descriptor. Lệnh: `lsof | grep deleted` để tìm các file như vậy.
+- Hard link vs symlink — sự khác biệt và khi nào dùng?
+- Tại sao `rm -rf /` rất nguy hiểm?
+- Làm thế nào để xem nội dung file binary?
+- Giải thích `2>&1` trong redirect.
+- `cp` vs `rsync` — khi nào dùng rsync?
